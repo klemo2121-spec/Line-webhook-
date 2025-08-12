@@ -1,13 +1,9 @@
 {
   "name": "line-webhook",
   "version": "1.0.0",
-  "description": "A simple LINE Webhook server for Vercel",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "type": "module",
+  "private": true,
   "dependencies": {
-    "express": "^4.18.2",
-    "body-parser": "^1.20.2"
+    "@line/bot-sdk": "^7.8.0"
   }
 }
