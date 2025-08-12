@@ -1,62 +1,58 @@
 // api/webhook.js
-
-// Vercel (Node 18+) already has global fetch.
+// LINE <-> OpenAI Translator (Thai <-> Hebrew)
 
 export default async function handler(req, res) {
-  if (req.method === 'GET') {
-    return res.status(200).send('LINE webhook is live.');
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
+  if (req.method !== 'POST') return res.status(200).send('OK');
 
   try {
-    const body = req.body;
-    const events = body?.events || [];
+    const events = req.body?.events || [];
 
-    // Handle each incoming LINE event
     const jobs = events.map(async (ev) => {
-      if (ev.type !== 'message' || ev.message.type !== 'text') return;
+      if (ev.type !== 'message' || ev.message?.type !== 'text') return;
 
       const userText = ev.message.text || '';
 
-      // 1) Call OpenAI to translate (HE<->TH). If not HE or TH, just echo.
-      let replyText = '🙂';
-      try {
-        const aiResp = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content:
-                  'You are a translator between Hebrew and Thai. Detect the input language automatically. If the user writes in Hebrew, translate to Thai. If the user writes in Thai, translate to Hebrew. Keep only the translation, no extra text.',
-              },
-              { role: 'user', content: userText },
-            ],
-            temperature: 0.2,
-          }),
-        });
+      // Language detection: Thai or Hebrew
+      const hasThai = /[\u0E00-\u0E7F]/.test(userText);
+      const hasHeb = /[\u0590-\u05FF]/.test(userText);
 
-        const aiJson = await aiResp.json();
-        replyText =
-          aiJson?.choices?.[0]?.message?.content?.trim() || '🙂';
-      } catch (e) {
-        replyText = 'מצטער, הייתה בעיה זמנית. נסה שוב.';
-      }
+      let target = 'Thai';
+      if (hasThai && !hasHeb) target = 'Hebrew';
+      if (hasHeb && !hasThai) target = 'Thai';
 
-      // 2) Reply to the user on LINE
+      // Ask OpenAI for translation only
+      const ai = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0.2,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a precise translator. Translate the user message into the TARGET language. Return ONLY the translation, no extra words.',
+            },
+            {
+              role: 'user',
+              content: `TARGET: ${target}\nTEXT: ${userText}`,
+            },
+          ],
+        }),
+      }).then((r) => r.json());
+
+      const replyText =
+        ai?.choices?.[0]?.message?.content?.trim() || 'Sorry, no translation.';
+
+      // Reply back to LINE
       await fetch('https://api.line.me/v2/bot/message/reply', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+          'Authorization': `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
         },
         body: JSON.stringify({
           replyToken: ev.replyToken,
@@ -69,6 +65,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error(err);
-    return res.status(200).json({ ok: true }); // LINE expects 200 regardless
+    return res.status(200).json({ ok: true });
   }
 }
