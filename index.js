@@ -1,21 +1,62 @@
-const express = require('express');
-const bodyParser = require('body-parser');
+// api/webhook.js
+// LINE <-> OpenAI Translator (Thai <-> Hebrew)
 
-const app = express();
-app.use(bodyParser.json());
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(200).send('OK');
 
-// Route for LINE Webhook
-app.post('/webhook', (req, res) => {
-    console.log('Received event:', JSON.stringify(req.body, null, 2));
-    res.status(200).send('OK');
-});
+  try {
+    const events = req.body?.events || [];
 
-// Health check route
-app.get('/', (req, res) => {
-    res.send('LINE Webhook is running!');
-});
+    await Promise.all(events.map(async (ev) => {
+      if (ev.type !== 'message' || ev.message?.type !== 'text') return;
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+      const userText = ev.message.text || '';
+
+      // זיהוי שפה בסיסי: תאי או עברית
+      const hasThai = /[\u0E00-\u0E7F]/.test(userText);
+      const hasHeb  = /[\u0590-\u05FF]/.test(userText);
+
+      let target = 'Thai';
+      if (hasThai && !hasHeb) target = 'Hebrew';
+      if (hasHeb  && !hasThai) target = 'Thai';
+
+      // תרגום בעזרת OpenAI
+      const ai = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0.2,
+          messages: [
+            { role: 'system',
+              content: 'You are a precise translator. Translate the user message into the TARGET language. Return ONLY the translation.' },
+            { role: 'user', content: `TARGET: ${target}\nTEXT: ${userText}` }
+          ]
+        })
+      }).then(r => r.json());
+
+      const replyText = ai?.choices?.[0]?.message?.content?.trim() || '…';
+
+      // תשובה ל‑LINE
+      await fetch('https://api.line.me/v2/bot/message/reply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+        },
+        body: JSON.stringify({
+          replyToken: ev.replyToken,
+          messages: [{ type: 'text', text: replyText }],
+        }),
+      });
+    }));
+
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(200).json({ ok: true });
+  }
+}
