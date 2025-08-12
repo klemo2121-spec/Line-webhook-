@@ -2,8 +2,5 @@
   "name": "line-webhook",
   "version": "1.0.0",
   "type": "module",
-  "private": true,
-  "dependencies": {
-    "@line/bot-sdk": "^7.8.0"
-  }
+  "private": true
 }
