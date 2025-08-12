@@ -1,28 +1,17 @@
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(200).send('LINE Webhook is running!');
-  }
+// נניח שיש לך userMessage מהאירוע:
+const userMessage = event.message.text;
 
-  const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
-  const events = (req.body && req.body.events) || [];
+// שולחים את הטקסט ל‑OpenAI
+const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+  },
+  body: JSON.stringify({
+    model: 'gpt-3.5-turbo',
+    messages: [{ role: 'user', content: userMessage }]
+  })
+}).then(r => r.json());
 
-  const jobs = events.map((e) => {
-    if (e.type === 'message' && e.message?.type === 'text') {
-      return fetch('https://api.line.me/v2/bot/message/reply', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          replyToken: e.replyToken,
-          messages: [{ type: 'text', text: `קיבלת הודעה: ${e.message.text}` }],
-        }),
-      });
-    }
-    return Promise.resolve();
-  });
-
-  await Promise.all(jobs).catch(() => {});
-  return res.status(200).end('OK');
-}
+const replyText = aiRes.choices?.[0]?.message?.content || '🙂';
