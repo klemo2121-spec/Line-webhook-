@@ -1,5 +1,6 @@
 // api/webhook.js
-// LINE <-> OpenAI Translator (Thai <-> Hebrew) + DEBUG LOGS
+// LINE <-> OpenAI Translator
+// עברית/אנגלית → תאית | תאית → עברית
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -7,7 +8,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log('Incoming body:', JSON.stringify(req.body)); // DEBUG
     const events = req.body?.events || [];
 
     await Promise.all(
@@ -16,13 +16,10 @@ export default async function handler(req, res) {
 
         const userText = ev.message.text || '';
 
-        // Detect language
+        // אם יש תאית → מתרגם לעברית, אחרת (עברית/אנגלית) → תאית
         const hasThai = /[\u0E00-\u0E7F]/.test(userText);
-        const hasHeb  = /[\u0590-\u05FF]/.test(userText);
-        let target = 'Hebrew';
-        if (hasHeb && !hasThai) target = 'Thai';
+        const target = hasThai ? 'Hebrew' : 'Thai';
 
-        // Call OpenAI
         let aiJson;
         try {
           const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -32,8 +29,7 @@ export default async function handler(req, res) {
               'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
             },
             body: JSON.stringify({
-              model: 'gpt-4o',
-              temperature: 0.2,
+              model: 'gpt-5-mini',
               messages: [
                 {
                   role: 'system',
@@ -44,20 +40,15 @@ export default async function handler(req, res) {
               ],
             }),
           });
-
           aiJson = await aiRes.json();
-          console.log('OpenAI status:', aiRes.status, 'body:', JSON.stringify(aiJson).slice(0, 500)); // DEBUG
-        } catch (e) {
-          console.error('OpenAI error:', e);
-        }
+        } catch (e) {}
 
         const replyText =
           aiJson?.choices?.[0]?.message?.content?.trim() ||
           'מצטער, לא הצלחתי לתרגם כרגע.';
 
-        // Reply to LINE
         try {
-          const lineRes = await fetch('https://api.line.me/v2/bot/message/reply', {
+          await fetch('https://api.line.me/v2/bot/message/reply', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -68,18 +59,12 @@ export default async function handler(req, res) {
               messages: [{ type: 'text', text: replyText }],
             }),
           });
-
-          const lineText = await lineRes.text();
-          console.log('LINE reply status:', lineRes.status, 'body:', lineText); // DEBUG חשוב
-        } catch (e) {
-          console.error('LINE reply error:', e);
-        }
+        } catch (e) {}
       })
     );
 
     return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error('Handler error:', err);
     return res.status(200).json({ ok: true });
   }
 }
