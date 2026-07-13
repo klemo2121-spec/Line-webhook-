@@ -237,6 +237,7 @@ async function handleCashierScreenshot(event) {
   const result = await calculateResult(context.cycleId);
 
   if (result.ready) {
+    await setDrawerBalance(result.countedCash);
     await replyCashierResult(event.replyToken, result);
   } else {
     await replyText(
@@ -276,6 +277,7 @@ async function saveCountedCash(event, amount) {
   const result = await calculateResult(context.cycleId);
 
   if (result.ready) {
+    await setDrawerBalance(result.countedCash);
     await replyCashierResult(event.replyToken, result);
   } else {
     await replyText(
@@ -329,6 +331,19 @@ async function addCashOut(event, amount) {
 
   await saveCycleState(context.cycleId, state);
 
+  if (
+    state.countedCash !== null &&
+    state.countedCash !== undefined &&
+    Number.isFinite(Number(state.countedCash))
+  ) {
+    await setDrawerBalance(Number(state.countedCash));
+  } else {
+    const currentDrawerBalance = await getDrawerBalance();
+    await setDrawerBalance(
+      Number(currentDrawerBalance || 0) - amount
+    );
+  }
+
   const result = await calculateResult(context.cycleId);
 
   const lines = [
@@ -379,6 +394,7 @@ async function setOpeningFloat(event, amount) {
   state.updatedAt = new Date().toISOString();
 
   await saveCycleState(context.cycleId, state);
+  await setDrawerBalance(amount);
 
   const result = await calculateResult(context.cycleId);
 
@@ -403,6 +419,7 @@ async function sendCashierStatus(event) {
   const context = getCashierContext();
   const state = await getCycleState(context.cycleId);
   const adjustment = await getAdjustment();
+  const drawerBalance = await getDrawerBalance();
   const result = await calculateResult(context.cycleId);
 
   const lines = [
@@ -427,7 +444,10 @@ async function sendCashierStatus(event) {
         ? 'Not received'
         : `${formatMoney(state.countedCash)} THB`
     }`,
-    `Opening Float: ${formatMoney(
+    `Saved Drawer Balance: ${formatMoney(
+      drawerBalance || 0
+    )} THB`,
+    `Opening Balance for This Check: ${formatMoney(
       state.openingFloat || 0
     )} THB`,
     `Cash Out: ${formatMoney(
@@ -457,9 +477,12 @@ async function sendCashierStatus(event) {
 async function resetCurrentCycle(event) {
   const context = getCashierContext();
 
+  const newState = createEmptyCycleState();
+  newState.openingFloat = await getDrawerBalance();
+
   await saveCycleState(
     context.cycleId,
-    createEmptyCycleState()
+    newState
   );
 
   await replyText(
@@ -605,7 +628,7 @@ function createCashierResultText(result) {
     `Cash for This Period: ${formatMoney(
       result.screenshotCash
     )} THB`,
-    `Opening Float: ${formatMoney(
+    `Opening Balance: ${formatMoney(
       result.openingFloat
     )} THB`,
     `Cash Out: ${formatMoney(
@@ -625,6 +648,10 @@ function createCashierResultText(result) {
       result.difference
     )} THB`,
     result.status,
+    '',
+    `Saved Drawer Balance: ${formatMoney(
+      result.countedCash
+    )} THB`,
   ].join('\n');
 }
 
@@ -1067,6 +1094,34 @@ function adjustmentKey() {
   return `cashier:adjustment:${CASHIER_GROUP_ID}`;
 }
 
+function drawerBalanceKey() {
+  return `cashier:drawer-balance:${CASHIER_GROUP_ID}`;
+}
+
+async function getDrawerBalance() {
+  const result = await redisCommand([
+    'GET',
+    drawerBalanceKey(),
+  ]);
+
+  const amount = Number(result || 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+async function setDrawerBalance(amount) {
+  const number = Number(amount);
+
+  if (!Number.isFinite(number)) {
+    throw new Error('Invalid drawer balance');
+  }
+
+  await redisCommand([
+    'SET',
+    drawerBalanceKey(),
+    String(number),
+  ]);
+}
+
 function cumulativeBaselineKey(reportDate) {
   return `cashier:cumulative:${CASHIER_GROUP_ID}:${reportDate}`;
 }
@@ -1094,10 +1149,20 @@ async function setLastCumulativeCash(reportDate, amount) {
 }
 
 async function getCycleState(cycleId) {
-  return redisGetJson(
+  const existing = await redisGetJson(
     cycleKey(cycleId),
-    createEmptyCycleState()
+    null
   );
+
+  if (existing) {
+    return existing;
+  }
+
+  const state = createEmptyCycleState();
+  state.openingFloat = await getDrawerBalance();
+
+  await saveCycleState(cycleId, state);
+  return state;
 }
 
 async function saveCycleState(cycleId, state) {
