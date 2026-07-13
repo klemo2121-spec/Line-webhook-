@@ -500,8 +500,7 @@ async function sendCashierStatus(event) {
     }
   }
 
-  await replyText(event.replyToken, lines.join('
-'));
+  await replyText(event.replyToken, lines.join('\n'));
 }
 
 async function resetCurrentCycle(event) {
@@ -719,8 +718,7 @@ function createCashierResultText(result) {
     lines.push('', '✅ Cash matches.');
   }
 
-  return lines.join('
-');
+  return lines.join('\n');
 }
 
 async function replyCashierResult(replyToken, result) {
