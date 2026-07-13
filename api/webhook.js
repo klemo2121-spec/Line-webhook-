@@ -161,11 +161,15 @@ async function handleCashierMessage(event) {
 
 async function handleCashierScreenshot(event) {
   const image = await downloadLineImage(event.message.id);
-  const screenshotCash = await readCashFromScreenshot(image);
+  const context = getCashierContext();
+  const screenshot = await readCashFromScreenshot(
+    image,
+    context.reportDate
+  );
 
   if (
-    screenshotCash === null ||
-    !Number.isFinite(screenshotCash)
+    screenshot?.cash === null ||
+    !Number.isFinite(Number(screenshot?.cash))
   ) {
     await replyText(
       event.replyToken,
@@ -177,10 +181,31 @@ async function handleCashierScreenshot(event) {
     return;
   }
 
-  const context = getCashierContext();
+  const cumulativeCash = Number(screenshot.cash);
+  const reportDate = screenshot.reportDate || context.reportDate;
+  const previousCumulativeCash =
+    await getLastCumulativeCash(reportDate);
+
+  let periodCash = cumulativeCash;
+  let baselineCash = 0;
+
+  if (
+    previousCumulativeCash !== null &&
+    Number.isFinite(Number(previousCumulativeCash)) &&
+    cumulativeCash >= Number(previousCumulativeCash)
+  ) {
+    baselineCash = Number(previousCumulativeCash);
+    periodCash = cumulativeCash - baselineCash;
+  }
+
+  await setLastCumulativeCash(reportDate, cumulativeCash);
+
   const state = await getCycleState(context.cycleId);
 
-  state.screenshotCash = screenshotCash;
+  state.screenshotCash = periodCash;
+  state.cumulativeCash = cumulativeCash;
+  state.baselineCash = baselineCash;
+  state.reportDate = reportDate;
   state.screenshotReceivedAt = new Date().toISOString();
   state.updatedAt = new Date().toISOString();
 
@@ -195,7 +220,10 @@ async function handleCashierScreenshot(event) {
       event.replyToken,
       [
         'Screenshot received ✅',
-        `POS Cash: ${formatMoney(screenshotCash)} THB`,
+        `Report Date: ${reportDate}`,
+        `Cumulative POS Cash: ${formatMoney(cumulativeCash)} THB`,
+        `Previous Baseline: ${formatMoney(baselineCash)} THB`,
+        `Cash for This Period: ${formatMoney(periodCash)} THB`,
         '',
         'Please send the counted cash.',
         'Example: count 12500',
@@ -334,11 +362,20 @@ async function sendCashierStatus(event) {
   const lines = [
     `Cashier Status — ${context.label}`,
     '',
-    `POS Cash: ${
+    `Cash for This Period: ${
       state.screenshotCash === null
         ? 'Not received'
         : `${formatMoney(state.screenshotCash)} THB`
     }`,
+    `Cumulative POS Cash: ${
+      state.cumulativeCash === null ||
+      state.cumulativeCash === undefined
+        ? 'Not received'
+        : `${formatMoney(state.cumulativeCash)} THB`
+    }`,
+    `Previous Baseline: ${formatMoney(
+      state.baselineCash || 0
+    )} THB`,
     `Counted Cash: ${
       state.countedCash === null
         ? 'Not received'
@@ -495,6 +532,9 @@ async function calculateResult(cycleId) {
   return {
     ready: true,
     screenshotCash,
+    cumulativeCash: Number(state.cumulativeCash ?? screenshotCash),
+    baselineCash: Number(state.baselineCash || 0),
+    reportDate: state.reportDate || '',
     countedCash,
     openingFloat,
     cashOutTotal,
@@ -509,7 +549,14 @@ function createCashierResultText(result) {
   return [
     'Cash Check Completed',
     '',
-    `POS Cash: ${formatMoney(
+    `Report Date: ${result.reportDate || 'Unknown'}`,
+    `Cumulative POS Cash: ${formatMoney(
+      result.cumulativeCash
+    )} THB`,
+    `Previous Baseline: ${formatMoney(
+      result.baselineCash
+    )} THB`,
+    `Cash for This Period: ${formatMoney(
       result.screenshotCash
     )} THB`,
     `Opening Float: ${formatMoney(
@@ -625,7 +672,7 @@ async function downloadLineImage(messageId) {
   };
 }
 
-async function readCashFromScreenshot(image) {
+async function readCashFromScreenshot(image, fallbackReportDate) {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('Missing OPENAI_API_KEY');
   }
@@ -651,10 +698,12 @@ async function readCashFromScreenshot(image) {
             'Find the payment-method amount labeled Cash.',
             'Do not use Net Sales.',
             'Do not use Transfer or QR.',
+            'Also read the report date shown in the screenshot.',
             'Return only valid JSON:',
-            '{"cash":860}',
+            '{"cash":860,"reportDate":"2026-07-11"}',
+            'Use YYYY-MM-DD for reportDate.',
             'If the Cash amount cannot be found, return:',
-            '{"cash":null}',
+            '{"cash":null,"reportDate":null}',
           ].join(' '),
         },
         {
@@ -692,14 +741,25 @@ async function readCashFromScreenshot(image) {
 
   if (json && json.cash !== null) {
     const amount = normalizeAmount(json.cash);
-    if (amount !== null) return amount;
+
+    if (amount !== null) {
+      return {
+        cash: amount,
+        reportDate:
+          normalizeReportDate(json.reportDate) ||
+          fallbackReportDate,
+      };
+    }
   }
 
   const match = content.match(
     /(?:cash["']?\s*[:=]\s*|฿\s*)([\d,]+(?:\.\d{1,2})?)/i
   );
 
-  return match ? normalizeAmount(match[1]) : null;
+  return {
+    cash: match ? normalizeAmount(match[1]) : null,
+    reportDate: fallbackReportDate,
+  };
 }
 
 /* =========================================================
@@ -837,6 +897,32 @@ function adjustmentKey() {
   return `cashier:adjustment:${CASHIER_GROUP_ID}`;
 }
 
+function cumulativeBaselineKey(reportDate) {
+  return `cashier:cumulative:${CASHIER_GROUP_ID}:${reportDate}`;
+}
+
+async function getLastCumulativeCash(reportDate) {
+  const result = await redisCommand([
+    'GET',
+    cumulativeBaselineKey(reportDate),
+  ]);
+
+  if (result === null || result === undefined) {
+    return null;
+  }
+
+  const amount = Number(result);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+async function setLastCumulativeCash(reportDate, amount) {
+  await redisCommand([
+    'SET',
+    cumulativeBaselineKey(reportDate),
+    String(amount),
+  ]);
+}
+
 async function getCycleState(cycleId) {
   return redisGetJson(
     cycleKey(cycleId),
@@ -869,6 +955,9 @@ async function setAdjustment(amount) {
 function createEmptyCycleState() {
   return {
     screenshotCash: null,
+    cumulativeCash: null,
+    baselineCash: 0,
+    reportDate: null,
     countedCash: null,
     openingFloat: 0,
     cashOutTotal: 0,
@@ -985,12 +1074,14 @@ function getCashierContext() {
     return {
       cycleId: `${date}:evening`,
       label: `Evening shift — ${date}`,
+      reportDate: date,
     };
   }
 
   return {
     cycleId: `${currentDate}:morning`,
     label: `Morning shift — ${currentDate}`,
+    reportDate: currentDate,
   };
 }
 
@@ -1045,6 +1136,24 @@ function normalizeAmount(value) {
   const amount = Number(cleaned);
 
   return Number.isFinite(amount) ? amount : null;
+}
+
+function normalizeReportDate(value) {
+  if (!value) return null;
+
+  const text = String(value).trim();
+
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return text;
+
+  const slash = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (slash) {
+    const day = slash[1].padStart(2, '0');
+    const month = slash[2].padStart(2, '0');
+    return `${slash[3]}-${month}-${day}`;
+  }
+
+  return null;
 }
 
 function formatMoney(amount) {
