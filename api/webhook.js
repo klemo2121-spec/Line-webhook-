@@ -15,8 +15,31 @@ const UPSTASH_REDIS_REST_URL =
 const UPSTASH_REDIS_REST_TOKEN =
   'gQAAAAAAATGwAAIgcDEzYmE2NjgxN2U4MTM0ODAwYTEyMTg4MGJhNDFhODgyZQ';
 
+
+// Secret used by the external scheduler.
+const CRON_SECRET = 'mcm-yelXWbVPa-1NygUniWYsDT3o4yohdKdR';
 export default async function handler(req, res) {
   if (req.method === 'GET') {
+    const action = String(req.query?.action || '').trim();
+    const key = String(req.query?.key || '').trim();
+
+    if (action) {
+      if (key !== CRON_SECRET) {
+        return res.status(401).json({ ok: false, error: 'Unauthorized' });
+      }
+
+      try {
+        const result = await runScheduledReminder(action);
+        return res.status(200).json({ ok: true, result });
+      } catch (error) {
+        console.error('Scheduled reminder error:', error);
+        return res.status(500).json({
+          ok: false,
+          error: error?.message || 'Reminder failed',
+        });
+      }
+    }
+
     return res.status(200).send('OK');
   }
 
@@ -659,6 +682,130 @@ function cashierHelp() {
     'You may also send only a number.',
     'Example: 12500',
   ].join('\n');
+}
+
+
+/* =========================================================
+   AUTOMATIC REMINDERS
+========================================================= */
+
+async function runScheduledReminder(action) {
+  const context = getCashierContext();
+  const state = await getCycleState(context.cycleId);
+
+  const validActions = new Set([
+    'start',
+    'check15',
+    'check30',
+  ]);
+
+  if (!validActions.has(action)) {
+    throw new Error('Unknown reminder action');
+  }
+
+  const reminderKey =
+    `cashier:reminder:${CASHIER_GROUP_ID}:${context.cycleId}:${action}`;
+
+  const alreadySent = await redisCommand(['GET', reminderKey]);
+
+  if (alreadySent) {
+    return {
+      sent: false,
+      reason: 'Already sent',
+      cycle: context.cycleId,
+      action,
+    };
+  }
+
+  let message = '';
+
+  if (action === 'start') {
+    message = [
+      `Cashier Check — ${context.label}`,
+      '',
+      'Please send:',
+      '1. The FlowAccount cashier screenshot',
+      '2. The counted cash amount',
+      '',
+      'Example: count 12500',
+    ].join('\n');
+  }
+
+  if (action === 'check15') {
+    const missing = getMissingCashierItems(state);
+
+    if (missing.length === 0) {
+      return {
+        sent: false,
+        reason: 'Report complete',
+        cycle: context.cycleId,
+        action,
+      };
+    }
+
+    message = [
+      `Reminder — ${context.label}`,
+      '',
+      `Still missing: ${missing.join(' and ')}.`,
+      'Please send the missing information now.',
+    ].join('\n');
+  }
+
+  if (action === 'check30') {
+    const missing = getMissingCashierItems(state);
+
+    if (missing.length === 0) {
+      return {
+        sent: false,
+        reason: 'Report complete',
+        cycle: context.cycleId,
+        action,
+      };
+    }
+
+    message = [
+      `Overdue Cashier Report — ${context.label} ⚠️`,
+      '',
+      `Still missing: ${missing.join(' and ')}.`,
+      'The cashier report is now late. Please update the group immediately.',
+    ].join('\n');
+  }
+
+  await pushText(CASHIER_GROUP_ID, message);
+
+  await redisCommand([
+    'SET',
+    reminderKey,
+    new Date().toISOString(),
+    'EX',
+    '172800',
+  ]);
+
+  return {
+    sent: true,
+    cycle: context.cycleId,
+    action,
+  };
+}
+
+function getMissingCashierItems(state) {
+  const missing = [];
+
+  if (
+    state.screenshotCash === null ||
+    state.screenshotCash === undefined
+  ) {
+    missing.push('cashier screenshot');
+  }
+
+  if (
+    state.countedCash === null ||
+    state.countedCash === undefined
+  ) {
+    missing.push('counted cash');
+  }
+
+  return missing;
 }
 
 /* =========================================================
