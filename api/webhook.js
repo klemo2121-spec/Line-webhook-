@@ -1143,6 +1143,41 @@ function createEmptyCycleState() {
    LINE MESSAGES
 ========================================================= */
 
+
+async function pushText(to, text) {
+  if (!to || !text) return;
+
+  const response = await fetch(
+    `${LINE_API}/message/push`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization:
+          `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({
+        to,
+        messages: [
+          {
+            type: 'text',
+            text: String(text).slice(0, 5000),
+          },
+        ],
+      }),
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    console.error('LINE push error:', data);
+    throw new Error(
+      `LINE push failed: ${response.status}`
+    );
+  }
+}
+
 async function replyText(
   replyToken,
   text,
