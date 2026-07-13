@@ -148,6 +148,14 @@ async function handleCashierMessage(event) {
     return;
   }
 
+  if (
+    text === 'clear baseline' ||
+    text === 'reset baseline'
+  ) {
+    await clearBaseline(event);
+    return;
+  }
+
   const cashOutAmount = parseCommandAmount(
     originalText,
     /^(?:cash\s*out|cashout|out)\s*[:=-]?\s*/i
@@ -188,6 +196,7 @@ async function handleCashierMessage(event) {
       'reset',
       'reset shortage',
       'clear adjustment',
+      'clear baseline',
     ].join('\n')
   );
 }
@@ -231,8 +240,6 @@ async function handleCashierScreenshot(event) {
     periodCash = cumulativeCash - baselineCash;
   }
 
-  await setLastCumulativeCash(reportDate, cumulativeCash);
-
   const state = await getCycleState(context.cycleId);
 
   state.screenshotCash = periodCash;
@@ -247,6 +254,7 @@ async function handleCashierScreenshot(event) {
   const result = await calculateResult(context.cycleId);
 
   if (result.ready) {
+    await setLastCumulativeCash(reportDate, cumulativeCash);
     await setDrawerBalance(result.countedCash);
     await replyCashierResult(event.replyToken, result);
   } else {
@@ -287,6 +295,17 @@ async function saveCountedCash(event, amount) {
   const result = await calculateResult(context.cycleId);
 
   if (result.ready) {
+    if (
+      state.reportDate &&
+      state.cumulativeCash !== null &&
+      state.cumulativeCash !== undefined
+    ) {
+      await setLastCumulativeCash(
+        state.reportDate,
+        Number(state.cumulativeCash)
+      );
+    }
+
     await setDrawerBalance(result.countedCash);
     await replyCashierResult(event.replyToken, result);
   } else {
@@ -606,6 +625,25 @@ async function clearAdjustment(event) {
   await replyText(event.replyToken, lines.join('\n'));
 }
 
+
+async function clearBaseline(event) {
+  const context = getCashierContext();
+
+  await redisCommand([
+    'DEL',
+    cumulativeBaselineKey(context.reportDate),
+  ]);
+
+  await replyText(
+    event.replyToken,
+    [
+      'Baseline cleared ✅',
+      `Report Date: ${context.reportDate}`,
+      'The next screenshot will be treated as Cash In.',
+    ].join('\n')
+  );
+}
+
 async function calculateResult(cycleId) {
   const state = await getCycleState(cycleId);
   const adjustment = await getAdjustment();
@@ -772,6 +810,7 @@ function cashierHelp() {
     'reset',
     'reset shortage',
     'clear adjustment',
+    'clear baseline',
     '',
     'You may also send only a number.',
     'Example: 12500',
