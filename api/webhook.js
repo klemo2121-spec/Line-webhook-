@@ -139,6 +139,15 @@ async function handleCashierMessage(event) {
     return;
   }
 
+  if (
+    text === 'clear adjustment' ||
+    text === 'reset adjustment' ||
+    text === 'adjustment 0'
+  ) {
+    await clearAdjustment(event);
+    return;
+  }
+
   const cashOutAmount = parseCommandAmount(
     originalText,
     /^(?:cash\s*out|cashout|out)\s*[:=-]?\s*/i
@@ -178,6 +187,7 @@ async function handleCashierMessage(event) {
       'status',
       'reset',
       'reset shortage',
+      'clear adjustment',
     ].join('\n')
   );
 }
@@ -548,6 +558,35 @@ async function resetDifference(event) {
   );
 }
 
+
+async function clearAdjustment(event) {
+  const previousAdjustment = await getAdjustment();
+  await setAdjustment(0);
+
+  const context = getCashierContext();
+  const result = await calculateResult(context.cycleId);
+
+  const lines = [
+    'Adjustment cleared ✅',
+    `Previous Adjustment: ${formatSignedMoney(
+      previousAdjustment
+    )} THB`,
+    'New Adjustment: 0 THB',
+  ];
+
+  if (result.ready) {
+    lines.push(
+      '',
+      `Updated Difference: ${formatSignedMoney(
+        result.difference
+      )} THB`,
+      result.status
+    );
+  }
+
+  await replyText(event.replyToken, lines.join('\n'));
+}
+
 async function calculateResult(cycleId) {
   const state = await getCycleState(cycleId);
   const adjustment = await getAdjustment();
@@ -705,6 +744,7 @@ function cashierHelp() {
     'status',
     'reset',
     'reset shortage',
+    'clear adjustment',
     '',
     'You may also send only a number.',
     'Example: 12500',
