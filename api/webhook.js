@@ -12,13 +12,10 @@ const CASHIER_GROUP_ID = 'C1035c01c8ae9076c1a3dc98132c64de5';
 const UPSTASH_REDIS_REST_URL =
   'https://proud-bluejay-78256.upstash.io';
 
-// Paste the Upstash REST token between the quotation marks.
 const UPSTASH_REDIS_REST_TOKEN =
-UPSTASH_REDIS_REST_URL="https://proud-bluejay-78256.upstash.io"
-UPSTASH_REDIS_REST_TOKEN="gQAAAAAAATGwAAIgcDEzYmE2NjgxN2U4MTM0ODAwYTEyMTg4MGJhNDFhODgyZQ" ;
+  'gQAAAAAAATGwAAIgcDEzYmE2NjgxN2U4MTM0ODAwYTEyMTg4MGJhNDFhODgyZQ';
 
 export default async function handler(req, res) {
-  // Opening the URL in a browser.
   if (req.method === 'GET') {
     return res.status(200).send('OK');
   }
@@ -163,11 +160,6 @@ async function handleCashierMessage(event) {
 }
 
 async function handleCashierScreenshot(event) {
-  await replyText(
-    event.replyToken,
-    'Screenshot received. Reading the Cash amount...'
-  );
-
   const image = await downloadLineImage(event.message.id);
   const screenshotCash = await readCashFromScreenshot(image);
 
@@ -175,8 +167,8 @@ async function handleCashierScreenshot(event) {
     screenshotCash === null ||
     !Number.isFinite(screenshotCash)
   ) {
-    await pushText(
-      CASHIER_GROUP_ID,
+    await replyText(
+      event.replyToken,
       [
         'I could not read the Cash amount.',
         'Please send the screenshot again.',
@@ -197,11 +189,12 @@ async function handleCashierScreenshot(event) {
   const result = await calculateResult(context.cycleId);
 
   if (result.ready) {
-    await pushCashierResult(result);
+    await replyCashierResult(event.replyToken, result);
   } else {
-    await pushText(
-      CASHIER_GROUP_ID,
+    await replyText(
+      event.replyToken,
       [
+        'Screenshot received ✅',
         `POS Cash: ${formatMoney(screenshotCash)} THB`,
         '',
         'Please send the counted cash.',
@@ -392,7 +385,7 @@ async function resetCurrentCycle(event) {
       'Current cashier check reset ✅',
       `Cycle: ${context.label}`,
       '',
-      'The permanent shortage adjustment was not changed.',
+      'The shortage adjustment was not changed.',
     ].join('\n')
   );
 }
@@ -421,9 +414,6 @@ async function resetDifference(event) {
   }
 
   const oldAdjustment = await getAdjustment();
-
-  // If counted cash is 100 below expected,
-  // the adjustment becomes 100 lower.
   const newAdjustment =
     Number(oldAdjustment || 0) + result.difference;
 
@@ -584,13 +574,6 @@ async function replyCashierResult(replyToken, result) {
   );
 }
 
-async function pushCashierResult(result) {
-  await pushText(
-    CASHIER_GROUP_ID,
-    createCashierResultText(result)
-  );
-}
-
 function cashierHelp() {
   return [
     'Cashier Bot Commands',
@@ -709,7 +692,6 @@ async function readCashFromScreenshot(image) {
 
   if (json && json.cash !== null) {
     const amount = normalizeAmount(json.cash);
-
     if (amount !== null) return amount;
   }
 
@@ -799,16 +781,6 @@ Rules:
 ========================================================= */
 
 async function redisCommand(command) {
-  if (
-    !UPSTASH_REDIS_REST_TOKEN ||
-    UPSTASH_REDIS_REST_TOKEN ===
-      'PASTE_YOUR_UPSTASH_TOKEN_HERE'
-  ) {
-    throw new Error(
-      'Paste the Upstash token into webhook.js'
-    );
-  }
-
   const response = await fetch(
     UPSTASH_REDIS_REST_URL,
     {
@@ -952,38 +924,6 @@ async function replyText(
     console.error('LINE reply error:', data);
     throw new Error(
       `LINE reply failed: ${response.status}`
-    );
-  }
-}
-
-async function pushText(to, text) {
-  const response = await fetch(
-    `${LINE_API}/message/push`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization:
-          `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
-      },
-      body: JSON.stringify({
-        to,
-        messages: [
-          {
-            type: 'text',
-            text: String(text).slice(0, 5000),
-          },
-        ],
-      }),
-    }
-  );
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    console.error('LINE push error:', data);
-    throw new Error(
-      `LINE push failed: ${response.status}`
     );
   }
 }
