@@ -428,60 +428,80 @@ async function setOpeningFloat(event, amount) {
 async function sendCashierStatus(event) {
   const context = getCashierContext();
   const state = await getCycleState(context.cycleId);
-  const adjustment = await getAdjustment();
-  const drawerBalance = await getDrawerBalance();
   const result = await calculateResult(context.cycleId);
 
+  const previousBalance = Number(state.openingFloat || 0);
+  const cashIn = Number(state.screenshotCash || 0);
+  const cashOut = Number(state.cashOutTotal || 0);
+  const currentBalance =
+    previousBalance + cashIn - cashOut;
+
   const lines = [
-    `Cashier Status — ${context.label}`,
+    `Cash Summary — ${context.label}`,
     '',
-    `Cash for This Period: ${
-      state.screenshotCash === null
-        ? 'Not received'
-        : `${formatMoney(state.screenshotCash)} THB`
-    }`,
-    `Cumulative POS Cash: ${
-      state.cumulativeCash === null ||
-      state.cumulativeCash === undefined
-        ? 'Not received'
-        : `${formatMoney(state.cumulativeCash)} THB`
-    }`,
-    `Previous Baseline: ${formatMoney(
-      state.baselineCash || 0
+    `Previous Balance: ${formatMoney(
+      previousBalance
     )} THB`,
-    `Counted Cash: ${
-      state.countedCash === null
-        ? 'Not received'
-        : `${formatMoney(state.countedCash)} THB`
-    }`,
-    `Saved Drawer Balance: ${formatMoney(
-      drawerBalance || 0
-    )} THB`,
-    `Opening Balance for This Check: ${formatMoney(
-      state.openingFloat || 0
-    )} THB`,
-    `Cash Out: ${formatMoney(
-      state.cashOutTotal || 0
-    )} THB`,
-    `Adjustment: ${formatSignedMoney(
-      adjustment
-    )} THB`,
+    `Cash In: ${formatMoney(cashIn)} THB`,
   ];
+
+  if (cashOut > 0) {
+    lines.push(
+      `Cash Out: ${formatMoney(cashOut)} THB`
+    );
+  }
+
+  lines.push(
+    `Current Balance: ${formatMoney(
+      currentBalance
+    )} THB`
+  );
 
   if (result.ready) {
     lines.push(
       '',
-      `Expected Cash: ${formatMoney(
-        result.expectedCash
-      )} THB`,
-      `Difference: ${formatSignedMoney(
-        result.difference
-      )} THB`,
-      result.status
+      `Counted Cash: ${formatMoney(
+        result.countedCash
+      )} THB`
     );
+
+    if (Math.abs(result.difference) >= 0.01) {
+      lines.push(
+        `Difference: ${formatSignedMoney(
+          result.difference
+        )} THB`,
+        result.status
+      );
+    } else {
+      lines.push('✅ Cash matches.');
+    }
+  } else {
+    const missing = [];
+
+    if (
+      state.screenshotCash === null ||
+      state.screenshotCash === undefined
+    ) {
+      missing.push('cashier screenshot');
+    }
+
+    if (
+      state.countedCash === null ||
+      state.countedCash === undefined
+    ) {
+      missing.push('counted cash');
+    }
+
+    if (missing.length > 0) {
+      lines.push(
+        '',
+        `Still missing: ${missing.join(' and ')}.`
+      );
+    }
   }
 
-  await replyText(event.replyToken, lines.join('\n'));
+  await replyText(event.replyToken, lines.join('
+'));
 }
 
 async function resetCurrentCycle(event) {
@@ -654,44 +674,53 @@ async function calculateResult(cycleId) {
 }
 
 function createCashierResultText(result) {
-  return [
-    'Cash Check Completed',
+  const currentBalance =
+    Number(result.openingFloat || 0) +
+    Number(result.screenshotCash || 0) -
+    Number(result.cashOutTotal || 0);
+
+  const lines = [
+    'Cash Summary',
     '',
-    `Report Date: ${result.reportDate || 'Unknown'}`,
-    `Cumulative POS Cash: ${formatMoney(
-      result.cumulativeCash
-    )} THB`,
-    `Previous Baseline: ${formatMoney(
-      result.baselineCash
-    )} THB`,
-    `Cash for This Period: ${formatMoney(
-      result.screenshotCash
-    )} THB`,
-    `Opening Balance: ${formatMoney(
+    `Previous Balance: ${formatMoney(
       result.openingFloat
     )} THB`,
-    `Cash Out: ${formatMoney(
-      result.cashOutTotal
+    `Cash In: ${formatMoney(
+      result.screenshotCash
     )} THB`,
-    `Adjustment: ${formatSignedMoney(
-      result.adjustment
-    )} THB`,
-    `Expected Cash: ${formatMoney(
-      result.expectedCash
+  ];
+
+  if (Number(result.cashOutTotal || 0) > 0) {
+    lines.push(
+      `Cash Out: ${formatMoney(
+        result.cashOutTotal
+      )} THB`
+    );
+  }
+
+  lines.push(
+    `Current Balance: ${formatMoney(
+      currentBalance
     )} THB`,
     `Counted Cash: ${formatMoney(
       result.countedCash
-    )} THB`,
-    '',
-    `Difference: ${formatSignedMoney(
-      result.difference
-    )} THB`,
-    result.status,
-    '',
-    `Saved Drawer Balance: ${formatMoney(
-      result.countedCash
-    )} THB`,
-  ].join('\n');
+    )} THB`
+  );
+
+  if (Math.abs(result.difference) >= 0.01) {
+    lines.push(
+      '',
+      `Difference: ${formatSignedMoney(
+        result.difference
+      )} THB`,
+      result.status
+    );
+  } else {
+    lines.push('', '✅ Cash matches.');
+  }
+
+  return lines.join('
+');
 }
 
 async function replyCashierResult(replyToken, result) {
