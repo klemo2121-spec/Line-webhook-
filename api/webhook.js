@@ -293,6 +293,20 @@ async function handleCashierScreenshot(event) {
   // The last counted cash becomes the new opening balance, while old
   // Cash Out, manual Cash In and counted-cash values are cleared.
   if (previousCheckWasComplete) {
+    const previousDifference = Number(
+      state.lastDifference || 0
+    );
+
+    if (Math.abs(previousDifference) >= 0.01) {
+      const outstandingDifference =
+        await getOutstandingDifference();
+
+      await setOutstandingDifference(
+        Number(outstandingDifference || 0) +
+        previousDifference
+      );
+    }
+
     state = createEmptyCycleState();
     state.openingFloat = await getDrawerBalance();
   }
@@ -548,6 +562,7 @@ async function fullReset(event) {
     cycleKey(context.cycleId),
     adjustmentKey(),
     drawerBalanceKey(),
+    outstandingDifferenceKey(),
     cumulativeBaselineKey(context.reportDate),
     `cashier:reminder:${CASHIER_GROUP_ID}:${context.cycleId}:start`,
     `cashier:reminder:${CASHIER_GROUP_ID}:${context.cycleId}:check15`,
@@ -563,6 +578,7 @@ async function fullReset(event) {
       'Cash Out: 0 THB',
       'Adjustment: 0 THB',
       'Baseline: cleared',
+      'Outstanding difference: cleared',
       '',
       'Send a new screenshot and counted cash.',
     ].join('\n'),
@@ -775,6 +791,22 @@ async function sendCashierStatus(event) {
     }
   }
 
+  const outstandingDifference =
+    await getOutstandingDifference();
+
+  if (Math.abs(outstandingDifference) >= 0.01) {
+    lines.push(
+      '',
+      outstandingDifference < 0
+        ? `Previous unresolved shortage: ${formatMoney(
+            Math.abs(outstandingDifference)
+          )} THB`
+        : `Previous unresolved overage: ${formatMoney(
+            outstandingDifference
+          )} THB`
+    );
+  }
+
   await replyText(
     event.replyToken,
     lines.join('\n'),
@@ -805,6 +837,25 @@ async function resetCurrentCycle(event) {
 }
 
 async function resetDifference(event) {
+  const outstandingDifference =
+    await getOutstandingDifference();
+
+  if (Math.abs(outstandingDifference) >= 0.01) {
+    await setOutstandingDifference(0);
+
+    await replyText(
+      event.replyToken,
+      [
+        'Previous unresolved difference cleared ✅',
+        `Cleared: ${formatSignedMoney(
+          outstandingDifference
+        )} THB`,
+      ].join('\n'),
+      cashierQuickReplies()
+    );
+    return;
+  }
+
   const context = getCashierContext();
   const result = await calculateResult(context.cycleId);
 
@@ -907,6 +958,8 @@ async function clearBaseline(event) {
 async function calculateResult(cycleId) {
   const state = await getCycleState(cycleId);
   const adjustment = await getAdjustment();
+  const outstandingDifference =
+    await getOutstandingDifference();
 
   const hasScreenshot =
     state.screenshotCash !== null &&
@@ -969,6 +1022,9 @@ async function calculateResult(cycleId) {
     openingFloat,
     cashOutTotal,
     adjustment: Number(adjustment || 0),
+    outstandingDifference: Number(
+      outstandingDifference || 0
+    ),
     expectedCash,
     difference,
     status,
@@ -1031,6 +1087,26 @@ function createCashierResultText(result) {
     );
   } else {
     lines.push('', '✅ Cash matches.');
+  }
+
+  if (
+    Math.abs(
+      Number(result.outstandingDifference || 0)
+    ) >= 0.01
+  ) {
+    const outstanding =
+      Number(result.outstandingDifference || 0);
+
+    lines.push(
+      '',
+      outstanding < 0
+        ? `Previous unresolved shortage: ${formatMoney(
+            Math.abs(outstanding)
+          )} THB`
+        : `Previous unresolved overage: ${formatMoney(
+            outstanding
+          )} THB`
+    );
   }
 
   return lines.join('\n');
@@ -1488,6 +1564,34 @@ function adjustmentKey() {
 
 function drawerBalanceKey() {
   return `cashier:drawer-balance:${CASHIER_GROUP_ID}`;
+}
+
+function outstandingDifferenceKey() {
+  return `cashier:outstanding-difference:${CASHIER_GROUP_ID}`;
+}
+
+async function getOutstandingDifference() {
+  const result = await redisCommand([
+    'GET',
+    outstandingDifferenceKey(),
+  ]);
+
+  const amount = Number(result || 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+async function setOutstandingDifference(amount) {
+  const number = Number(amount);
+
+  if (!Number.isFinite(number)) {
+    throw new Error('Invalid outstanding difference');
+  }
+
+  await redisCommand([
+    'SET',
+    outstandingDifferenceKey(),
+    String(number),
+  ]);
 }
 
 async function getDrawerBalance() {
