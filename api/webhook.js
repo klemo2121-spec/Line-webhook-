@@ -156,6 +156,42 @@ async function handleCashierMessage(event) {
     return;
   }
 
+  if (
+    text === 'full reset' ||
+    text === 'reset all' ||
+    text === 'clear all'
+  ) {
+    await fullReset(event);
+    return;
+  }
+
+  if (text === 'undo') {
+    await undoLastCashAction(event);
+    return;
+  }
+
+  if (text === 'cash in') {
+    await replyText(
+      event.replyToken,
+      [
+        'Please send the Cash In amount.',
+        'Example: cash in 500',
+      ].join('\n'),
+      cashierQuickReplies()
+    );
+    return;
+  }
+
+  const cashInAmount = parseCommandAmount(
+    originalText,
+    /^(?:cash\s*in|cashin|in)\s*[:=-]?\s*/i
+  );
+
+  if (cashInAmount !== null) {
+    await addCashIn(event, cashInAmount);
+    return;
+  }
+
   const cashOutAmount = parseCommandAmount(
     originalText,
     /^(?:cash\s*out|cashout|out)\s*[:=-]?\s*/i
@@ -190,7 +226,10 @@ async function handleCashierMessage(event) {
       '',
       'Examples:',
       'count 12500',
+      'cash in 500',
       'cash out 500',
+      'undo',
+      'full reset',
       'float 1000',
       'status',
       'reset',
@@ -320,6 +359,201 @@ async function saveCountedCash(event, amount) {
   }
 }
 
+async function addCashIn(event, amount) {
+  if (amount <= 0) {
+    await replyText(
+      event.replyToken,
+      'Cash In must be greater than zero.',
+      cashierQuickReplies()
+    );
+    return;
+  }
+
+  const context = getCashierContext();
+  const state = await getCycleState(context.cycleId);
+
+  state.manualCashInTotal =
+    Number(state.manualCashInTotal || 0) + amount;
+
+  state.cashActionHistory = Array.isArray(state.cashActionHistory)
+    ? state.cashActionHistory
+    : [];
+
+  state.cashActionHistory.push({
+    type: 'cash-in',
+    amount,
+    userId: event.source?.userId || '',
+    createdAt: new Date().toISOString(),
+  });
+
+  state.updatedAt = new Date().toISOString();
+
+  await saveCycleState(context.cycleId, state);
+
+  const result = await calculateResult(context.cycleId);
+
+  if (
+    state.countedCash === null ||
+    state.countedCash === undefined ||
+    !Number.isFinite(Number(state.countedCash))
+  ) {
+    const currentDrawerBalance = await getDrawerBalance();
+    await setDrawerBalance(
+      Number(currentDrawerBalance || 0) + amount
+    );
+  }
+
+  const lines = [
+    'Cash In recorded ✅',
+    `Amount: ${formatMoney(amount)} THB`,
+    `Manual Cash In Total: ${formatMoney(
+      state.manualCashInTotal
+    )} THB`,
+  ];
+
+  if (result.ready) {
+    lines.push(
+      '',
+      `Counted Cash: ${formatMoney(
+        result.countedCash
+      )} THB`,
+      `Updated Difference: ${formatSignedMoney(
+        result.difference
+      )} THB`,
+      result.status
+    );
+  }
+
+  await replyText(
+    event.replyToken,
+    lines.join('\n'),
+    cashierQuickReplies()
+  );
+}
+
+async function undoLastCashAction(event) {
+  const context = getCashierContext();
+  const state = await getCycleState(context.cycleId);
+
+  state.cashActionHistory = Array.isArray(state.cashActionHistory)
+    ? state.cashActionHistory
+    : [];
+
+  const lastAction = state.cashActionHistory.pop();
+
+  if (!lastAction) {
+    await replyText(
+      event.replyToken,
+      'There is no Cash In or Cash Out action to undo.',
+      cashierQuickReplies()
+    );
+    return;
+  }
+
+  const amount = Number(lastAction.amount || 0);
+
+  if (lastAction.type === 'cash-in') {
+    state.manualCashInTotal = Math.max(
+      0,
+      Number(state.manualCashInTotal || 0) - amount
+    );
+  } else if (lastAction.type === 'cash-out') {
+    state.cashOutTotal = Math.max(
+      0,
+      Number(state.cashOutTotal || 0) - amount
+    );
+
+    if (Array.isArray(state.cashOutEntries)) {
+      for (let i = state.cashOutEntries.length - 1; i >= 0; i -= 1) {
+        if (
+          Number(state.cashOutEntries[i]?.amount || 0) === amount
+        ) {
+          state.cashOutEntries.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  state.updatedAt = new Date().toISOString();
+  await saveCycleState(context.cycleId, state);
+
+  if (
+    state.countedCash === null ||
+    state.countedCash === undefined ||
+    !Number.isFinite(Number(state.countedCash))
+  ) {
+    const currentDrawerBalance = await getDrawerBalance();
+
+    if (lastAction.type === 'cash-in') {
+      await setDrawerBalance(
+        Number(currentDrawerBalance || 0) - amount
+      );
+    } else if (lastAction.type === 'cash-out') {
+      await setDrawerBalance(
+        Number(currentDrawerBalance || 0) + amount
+      );
+    }
+  }
+
+  const result = await calculateResult(context.cycleId);
+
+  const lines = [
+    'Last action undone ✅',
+    `${
+      lastAction.type === 'cash-in'
+        ? 'Cash In'
+        : 'Cash Out'
+    }: ${formatMoney(amount)} THB`,
+  ];
+
+  if (result.ready) {
+    lines.push(
+      '',
+      `Updated Difference: ${formatSignedMoney(
+        result.difference
+      )} THB`,
+      result.status
+    );
+  }
+
+  await replyText(
+    event.replyToken,
+    lines.join('\n'),
+    cashierQuickReplies()
+  );
+}
+
+async function fullReset(event) {
+  const context = getCashierContext();
+
+  await redisCommand([
+    'DEL',
+    cycleKey(context.cycleId),
+    adjustmentKey(),
+    drawerBalanceKey(),
+    cumulativeBaselineKey(context.reportDate),
+    `cashier:reminder:${CASHIER_GROUP_ID}:${context.cycleId}:start`,
+    `cashier:reminder:${CASHIER_GROUP_ID}:${context.cycleId}:check15`,
+    `cashier:reminder:${CASHIER_GROUP_ID}:${context.cycleId}:check30`,
+  ]);
+
+  await replyText(
+    event.replyToken,
+    [
+      'Full reset completed ✅',
+      'Previous balance: 0 THB',
+      'Cash In: 0 THB',
+      'Cash Out: 0 THB',
+      'Adjustment: 0 THB',
+      'Baseline: cleared',
+      '',
+      'Send a new screenshot and counted cash.',
+    ].join('\n'),
+    cashierQuickReplies()
+  );
+}
+
 async function addCashOut(event, amount) {
   if (amount <= 0) {
     await replyText(
@@ -340,6 +574,17 @@ async function addCashOut(event, amount) {
     : [];
 
   state.cashOutEntries.push({
+    amount,
+    userId: event.source?.userId || '',
+    createdAt: new Date().toISOString(),
+  });
+
+  state.cashActionHistory = Array.isArray(state.cashActionHistory)
+    ? state.cashActionHistory
+    : [];
+
+  state.cashActionHistory.push({
+    type: 'cash-out',
     amount,
     userId: event.source?.userId || '',
     createdAt: new Date().toISOString(),
@@ -385,7 +630,11 @@ async function addCashOut(event, amount) {
     );
   }
 
-  await replyText(event.replyToken, lines.join('\n'));
+  await replyText(
+    event.replyToken,
+    lines.join('\n'),
+    cashierQuickReplies()
+  );
 }
 
 async function setOpeningFloat(event, amount) {
@@ -431,7 +680,9 @@ async function sendCashierStatus(event) {
   const result = await calculateResult(context.cycleId);
 
   const previousBalance = Number(state.openingFloat || 0);
-  const cashIn = Number(state.screenshotCash || 0);
+  const screenshotCashIn = Number(state.screenshotCash || 0);
+  const manualCashIn = Number(state.manualCashInTotal || 0);
+  const cashIn = screenshotCashIn + manualCashIn;
   const cashOut = Number(state.cashOutTotal || 0);
   const currentBalance =
     previousBalance + cashIn - cashOut;
@@ -444,6 +695,14 @@ async function sendCashierStatus(event) {
     )} THB`,
     `Cash In: ${formatMoney(cashIn)} THB`,
   ];
+
+  if (manualCashIn > 0) {
+    lines.push(
+      `Manual Cash In: ${formatMoney(
+        manualCashIn
+      )} THB`
+    );
+  }
 
   if (cashOut > 0) {
     lines.push(
@@ -500,7 +759,11 @@ async function sendCashierStatus(event) {
     }
   }
 
-  await replyText(event.replyToken, lines.join('\n'));
+  await replyText(
+    event.replyToken,
+    lines.join('\n'),
+    cashierQuickReplies()
+  );
 }
 
 async function resetCurrentCycle(event) {
@@ -645,12 +908,16 @@ async function calculateResult(cycleId) {
   }
 
   const screenshotCash = Number(state.screenshotCash);
+  const manualCashInTotal = Number(
+    state.manualCashInTotal || 0
+  );
   const countedCash = Number(state.countedCash);
   const openingFloat = Number(state.openingFloat || 0);
   const cashOutTotal = Number(state.cashOutTotal || 0);
 
   const expectedCash =
     screenshotCash +
+    manualCashInTotal +
     openingFloat -
     cashOutTotal +
     Number(adjustment || 0);
@@ -678,6 +945,7 @@ async function calculateResult(cycleId) {
   return {
     ready: true,
     screenshotCash,
+    manualCashInTotal,
     cumulativeCash: Number(state.cumulativeCash ?? screenshotCash),
     baselineCash: Number(state.baselineCash || 0),
     reportDate: state.reportDate || '',
@@ -692,9 +960,13 @@ async function calculateResult(cycleId) {
 }
 
 function createCashierResultText(result) {
+  const totalCashIn =
+    Number(result.screenshotCash || 0) +
+    Number(result.manualCashInTotal || 0);
+
   const currentBalance =
     Number(result.openingFloat || 0) +
-    Number(result.screenshotCash || 0) -
+    totalCashIn -
     Number(result.cashOutTotal || 0);
 
   const lines = [
@@ -704,9 +976,17 @@ function createCashierResultText(result) {
       result.openingFloat
     )} THB`,
     `Cash In: ${formatMoney(
-      result.screenshotCash
+      totalCashIn
     )} THB`,
   ];
+
+  if (Number(result.manualCashInTotal || 0) > 0) {
+    lines.push(
+      `Manual Cash In: ${formatMoney(
+        result.manualCashInTotal
+      )} THB`
+    );
+  }
 
   if (Number(result.cashOutTotal || 0) > 0) {
     lines.push(
@@ -741,42 +1021,48 @@ function createCashierResultText(result) {
 }
 
 async function replyCashierResult(replyToken, result) {
-  const quickReplies =
-    Math.abs(result.difference) >= 0.01
-      ? [
-          {
-            type: 'action',
-            action: {
-              type: 'message',
-              label: 'Reset difference',
-              text: 'reset shortage',
-            },
-          },
-          {
-            type: 'action',
-            action: {
-              type: 'message',
-              label: 'Status',
-              text: 'status',
-            },
-          },
-        ]
-      : [
-          {
-            type: 'action',
-            action: {
-              type: 'message',
-              label: 'Status',
-              text: 'status',
-            },
-          },
-        ];
-
   await replyText(
     replyToken,
     createCashierResultText(result),
-    quickReplies
+    cashierQuickReplies()
   );
+}
+
+function cashierQuickReplies() {
+  return [
+    {
+      type: 'action',
+      action: {
+        type: 'message',
+        label: 'Undo',
+        text: 'undo',
+      },
+    },
+    {
+      type: 'action',
+      action: {
+        type: 'message',
+        label: 'Cash In',
+        text: 'cash in',
+      },
+    },
+    {
+      type: 'action',
+      action: {
+        type: 'message',
+        label: 'Full Reset',
+        text: 'full reset',
+      },
+    },
+    {
+      type: 'action',
+      action: {
+        type: 'message',
+        label: 'Status',
+        text: 'status',
+      },
+    },
+  ];
 }
 
 function cashierHelp() {
@@ -785,7 +1071,10 @@ function cashierHelp() {
     '',
     'Send cashier screenshot',
     'count 12500',
+    'cash in 500',
     'cash out 500',
+    'undo',
+    'full reset',
     'float 1000',
     'status',
     'reset',
@@ -1277,6 +1566,7 @@ async function setAdjustment(amount) {
 function createEmptyCycleState() {
   return {
     screenshotCash: null,
+    manualCashInTotal: 0,
     cumulativeCash: null,
     baselineCash: 0,
     reportDate: null,
@@ -1284,6 +1574,7 @@ function createEmptyCycleState() {
     openingFloat: 0,
     cashOutTotal: 0,
     cashOutEntries: [],
+    cashActionHistory: [],
     lastExpectedCash: null,
     lastDifference: null,
     createdAt: new Date().toISOString(),
