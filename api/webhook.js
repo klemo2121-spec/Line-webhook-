@@ -279,7 +279,23 @@ async function handleCashierScreenshot(event) {
     periodCash = cumulativeCash - baselineCash;
   }
 
-  const state = await getCycleState(context.cycleId);
+  let state = await getCycleState(context.cycleId);
+
+  const previousCheckWasComplete =
+    state.screenshotCash !== null &&
+    state.screenshotCash !== undefined &&
+    Number.isFinite(Number(state.screenshotCash)) &&
+    state.countedCash !== null &&
+    state.countedCash !== undefined &&
+    Number.isFinite(Number(state.countedCash));
+
+  // A new screenshot after a completed check starts a fresh cashier check.
+  // The last counted cash becomes the new opening balance, while old
+  // Cash Out, manual Cash In and counted-cash values are cleared.
+  if (previousCheckWasComplete) {
+    state = createEmptyCycleState();
+    state.openingFloat = await getDrawerBalance();
+  }
 
   state.screenshotCash = periodCash;
   state.cumulativeCash = cumulativeCash;
