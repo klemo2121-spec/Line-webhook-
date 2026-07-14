@@ -493,8 +493,17 @@ async function undoLastCashAction(event) {
       Number(state.cashOutTotal || 0) - amount
     );
 
+    if (lastAction.adjustedCountedCash) {
+      state.countedCash =
+        Number(state.countedCash || 0) + amount;
+    }
+
     if (Array.isArray(state.cashOutEntries)) {
-      for (let i = state.cashOutEntries.length - 1; i >= 0; i -= 1) {
+      for (
+        let i = state.cashOutEntries.length - 1;
+        i >= 0;
+        i -= 1
+      ) {
         if (
           Number(state.cashOutEntries[i]?.amount || 0) === amount
         ) {
@@ -508,22 +517,21 @@ async function undoLastCashAction(event) {
   state.updatedAt = new Date().toISOString();
   await saveCycleState(context.cycleId, state);
 
-  if (
-    state.countedCash === null ||
-    state.countedCash === undefined ||
-    !Number.isFinite(Number(state.countedCash))
-  ) {
-    const currentDrawerBalance = await getDrawerBalance();
+  const currentDrawerBalance = await getDrawerBalance();
 
-    if (lastAction.type === 'cash-in') {
-      await setDrawerBalance(
-        Number(currentDrawerBalance || 0) - amount
-      );
-    } else if (lastAction.type === 'cash-out') {
-      await setDrawerBalance(
-        Number(currentDrawerBalance || 0) + amount
-      );
-    }
+  if (lastAction.type === 'cash-in') {
+    await setDrawerBalance(
+      Number(currentDrawerBalance || 0) - amount
+    );
+  } else if (
+    lastAction.type === 'cash-out' &&
+    lastAction.adjustedCountedCash
+  ) {
+    await setDrawerBalance(Number(state.countedCash || 0));
+  } else if (lastAction.type === 'cash-out') {
+    await setDrawerBalance(
+      Number(currentDrawerBalance || 0) + amount
+    );
   }
 
   const result = await calculateResult(context.cycleId);
@@ -536,6 +544,18 @@ async function undoLastCashAction(event) {
         : 'Cash Out'
     }: ${formatMoney(amount)} THB`,
   ];
+
+  if (
+    state.countedCash !== null &&
+    state.countedCash !== undefined &&
+    Number.isFinite(Number(state.countedCash))
+  ) {
+    lines.push(
+      `Counted Cash: ${formatMoney(
+        state.countedCash
+      )} THB`
+    );
+  }
 
   if (result.ready) {
     lines.push(
@@ -553,6 +573,7 @@ async function undoLastCashAction(event) {
     cashierQuickReplies()
   );
 }
+
 
 async function fullReset(event) {
   const context = getCashierContext();
@@ -598,8 +619,20 @@ async function addCashOut(event, amount) {
   const context = getCashierContext();
   const state = await getCycleState(context.cycleId);
 
+  const hasCountedCash =
+    state.countedCash !== null &&
+    state.countedCash !== undefined &&
+    Number.isFinite(Number(state.countedCash));
+
   state.cashOutTotal =
     Number(state.cashOutTotal || 0) + amount;
+
+  // If Cash Out is entered after the cash was counted,
+  // the physical counted balance must go down too.
+  if (hasCountedCash) {
+    state.countedCash =
+      Number(state.countedCash) - amount;
+  }
 
   state.cashOutEntries = Array.isArray(state.cashOutEntries)
     ? state.cashOutEntries
@@ -618,6 +651,7 @@ async function addCashOut(event, amount) {
   state.cashActionHistory.push({
     type: 'cash-out',
     amount,
+    adjustedCountedCash: hasCountedCash,
     userId: event.source?.userId || '',
     createdAt: new Date().toISOString(),
   });
@@ -626,14 +660,11 @@ async function addCashOut(event, amount) {
 
   await saveCycleState(context.cycleId, state);
 
-  if (
-    state.countedCash !== null &&
-    state.countedCash !== undefined &&
-    Number.isFinite(Number(state.countedCash))
-  ) {
+  if (hasCountedCash) {
     await setDrawerBalance(Number(state.countedCash));
   } else {
     const currentDrawerBalance = await getDrawerBalance();
+
     await setDrawerBalance(
       Number(currentDrawerBalance || 0) - amount
     );
@@ -649,12 +680,17 @@ async function addCashOut(event, amount) {
     )} THB`,
   ];
 
+  if (hasCountedCash) {
+    lines.push(
+      `Updated Counted Cash: ${formatMoney(
+        state.countedCash
+      )} THB`
+    );
+  }
+
   if (result.ready) {
     lines.push(
       '',
-      `Counted Cash: ${formatMoney(
-        result.countedCash
-      )} THB`,
       `Updated Difference: ${formatSignedMoney(
         result.difference
       )} THB`,
@@ -668,6 +704,7 @@ async function addCashOut(event, amount) {
     cashierQuickReplies()
   );
 }
+
 
 async function setOpeningFloat(event, amount) {
   if (amount < 0) {
