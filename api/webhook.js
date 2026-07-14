@@ -335,17 +335,6 @@ async function addCashOut(event, amount) {
   state.cashOutTotal =
     Number(state.cashOutTotal || 0) + amount;
 
-  // If cash was already counted, reduce the counted amount as well.
-  // This preserves the existing difference after money leaves the drawer.
-  if (
-    state.countedCash !== null &&
-    state.countedCash !== undefined &&
-    Number.isFinite(Number(state.countedCash))
-  ) {
-    state.countedCash =
-      Number(state.countedCash) - amount;
-  }
-
   state.cashOutEntries = Array.isArray(state.cashOutEntries)
     ? state.cashOutEntries
     : [];
@@ -383,24 +372,16 @@ async function addCashOut(event, amount) {
     )} THB`,
   ];
 
-  if (
-    state.countedCash !== null &&
-    state.countedCash !== undefined &&
-    Number.isFinite(Number(state.countedCash))
-  ) {
-    lines.push(
-      `Updated Counted Cash: ${formatMoney(
-        state.countedCash
-      )} THB`
-    );
-  }
-
   if (result.ready) {
     lines.push(
       '',
+      `Counted Cash: ${formatMoney(
+        result.countedCash
+      )} THB`,
       `Updated Difference: ${formatSignedMoney(
         result.difference
-      )} THB`
+      )} THB`,
+      result.status
     );
   }
 
