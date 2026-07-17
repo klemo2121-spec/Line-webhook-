@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/webhook?action=start&key=PASTE_YOUR_CRON_SECRET_HERE",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
