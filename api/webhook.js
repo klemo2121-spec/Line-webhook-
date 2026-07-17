@@ -148,13 +148,6 @@ async function handleCashierMessage(event) {
     return;
   }
 
-  if (
-    text === 'clear baseline' ||
-    text === 'reset baseline'
-  ) {
-    await clearBaseline(event);
-    return;
-  }
 
   if (
     text === 'full reset' ||
@@ -235,7 +228,6 @@ async function handleCashierMessage(event) {
       'reset',
       'reset shortage',
       'clear adjustment',
-      'clear baseline',
     ].join('\n')
   );
 }
@@ -262,58 +254,16 @@ async function handleCashierScreenshot(event) {
     return;
   }
 
-  const cumulativeCash = Number(screenshot.cash);
-  const reportDate = screenshot.reportDate || context.reportDate;
-  const previousCumulativeCash =
-    await getLastCumulativeCash(reportDate);
+  const cashIn = Number(screenshot.cash);
+  const reportDate = context.reportDate;
+  const state = await getCycleState(context.cycleId);
 
-  let periodCash = cumulativeCash;
-  let baselineCash = 0;
-
-  if (
-    previousCumulativeCash !== null &&
-    Number.isFinite(Number(previousCumulativeCash)) &&
-    cumulativeCash >= Number(previousCumulativeCash)
-  ) {
-    baselineCash = Number(previousCumulativeCash);
-    periodCash = cumulativeCash - baselineCash;
-  }
-
-  let state = await getCycleState(context.cycleId);
-
-  const previousCheckWasComplete =
-    state.screenshotCash !== null &&
-    state.screenshotCash !== undefined &&
-    Number.isFinite(Number(state.screenshotCash)) &&
-    state.countedCash !== null &&
-    state.countedCash !== undefined &&
-    Number.isFinite(Number(state.countedCash));
-
-  // A new screenshot after a completed check starts a fresh cashier check.
-  // The last counted cash becomes the new opening balance, while old
-  // Cash Out, manual Cash In and counted-cash values are cleared.
-  if (previousCheckWasComplete) {
-    const previousDifference = Number(
-      state.lastDifference || 0
-    );
-
-    if (Math.abs(previousDifference) >= 0.01) {
-      const outstandingDifference =
-        await getOutstandingDifference();
-
-      await setOutstandingDifference(
-        Number(outstandingDifference || 0) +
-        previousDifference
-      );
-    }
-
-    state = createEmptyCycleState();
-    state.openingFloat = await getDrawerBalance();
-  }
-
-  state.screenshotCash = periodCash;
-  state.cumulativeCash = cumulativeCash;
-  state.baselineCash = baselineCash;
+  // One daily morning check for yesterday.
+  // The Cash amount in the screenshot is used directly.
+  // No baseline and no subtraction from earlier screenshots.
+  state.screenshotCash = cashIn;
+  state.cumulativeCash = cashIn;
+  state.baselineCash = 0;
   state.reportDate = reportDate;
   state.screenshotReceivedAt = new Date().toISOString();
   state.updatedAt = new Date().toISOString();
@@ -323,7 +273,6 @@ async function handleCashierScreenshot(event) {
   const result = await calculateResult(context.cycleId);
 
   if (result.ready) {
-    await setLastCumulativeCash(reportDate, cumulativeCash);
     await setDrawerBalance(result.countedCash);
     await replyCashierResult(event.replyToken, result);
   } else {
@@ -332,9 +281,7 @@ async function handleCashierScreenshot(event) {
       [
         'Screenshot received ✅',
         `Report Date: ${reportDate}`,
-        `Cumulative POS Cash: ${formatMoney(cumulativeCash)} THB`,
-        `Previous Baseline: ${formatMoney(baselineCash)} THB`,
-        `Cash for This Period: ${formatMoney(periodCash)} THB`,
+        `Cash In: ${formatMoney(cashIn)} THB`,
         '',
         'Please send the counted cash.',
         'Example: count 12500',
@@ -364,17 +311,6 @@ async function saveCountedCash(event, amount) {
   const result = await calculateResult(context.cycleId);
 
   if (result.ready) {
-    if (
-      state.reportDate &&
-      state.cumulativeCash !== null &&
-      state.cumulativeCash !== undefined
-    ) {
-      await setLastCumulativeCash(
-        state.reportDate,
-        Number(state.cumulativeCash)
-      );
-    }
-
     await setDrawerBalance(result.countedCash);
     await replyCashierResult(event.replyToken, result);
   } else {
@@ -598,7 +534,6 @@ async function fullReset(event) {
       'Cash In: 0 THB',
       'Cash Out: 0 THB',
       'Adjustment: 0 THB',
-      'Baseline: cleared',
       'Outstanding difference: cleared',
       '',
       'Send a new screenshot and counted cash.',
@@ -974,24 +909,6 @@ async function clearAdjustment(event) {
 }
 
 
-async function clearBaseline(event) {
-  const context = getCashierContext();
-
-  await redisCommand([
-    'DEL',
-    cumulativeBaselineKey(context.reportDate),
-  ]);
-
-  await replyText(
-    event.replyToken,
-    [
-      'Baseline cleared ✅',
-      `Report Date: ${context.reportDate}`,
-      'The next screenshot will be treated as Cash In.',
-    ].join('\n')
-  );
-}
-
 async function calculateResult(cycleId) {
   const state = await getCycleState(cycleId);
   const adjustment = await getAdjustment();
@@ -1209,7 +1126,6 @@ function cashierHelp() {
     'reset',
     'reset shortage',
     'clear adjustment',
-    'clear baseline',
     '',
     'You may also send only a number.',
     'Example: 12500',
@@ -1836,8 +1752,6 @@ function getCashierContext() {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-      hour: '2-digit',
-      hourCycle: 'h23',
     }
   ).formatToParts(now);
 
@@ -1848,45 +1762,36 @@ function getCashierContext() {
     ])
   );
 
-  const hour = Number(values.hour);
   const currentDate =
     `${values.year}-${values.month}-${values.day}`;
 
-  if (hour < 13) {
-    const yesterday = new Date(
-      `${currentDate}T00:00:00+07:00`
-    );
+  const yesterday = new Date(
+    `${currentDate}T00:00:00+07:00`
+  );
 
-    yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setDate(yesterday.getDate() - 1);
 
-    const yesterdayParts =
-      new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Bangkok',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).formatToParts(yesterday);
+  const yesterdayParts =
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(yesterday);
 
-    const y = Object.fromEntries(
-      yesterdayParts.map((part) => [
-        part.type,
-        part.value,
-      ])
-    );
+  const y = Object.fromEntries(
+    yesterdayParts.map((part) => [
+      part.type,
+      part.value,
+    ])
+  );
 
-    const date = `${y.year}-${y.month}-${y.day}`;
-
-    return {
-      cycleId: `${date}:evening`,
-      label: `Evening shift — ${date}`,
-      reportDate: date,
-    };
-  }
+  const reportDate = `${y.year}-${y.month}-${y.day}`;
 
   return {
-    cycleId: `${currentDate}:morning`,
-    label: `Morning shift — ${currentDate}`,
-    reportDate: currentDate,
+    cycleId: `${reportDate}:daily-close`,
+    label: `Daily Close — ${reportDate}`,
+    reportDate,
   };
 }
 
