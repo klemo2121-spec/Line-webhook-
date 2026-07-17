@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/webhook?action=start&key=PASTE_YOUR_CRON_SECRET_HERE",
+      "path": "/api/webhook?action=start&key=mcm-yelXWbVPa-1NygUniWYsDT3o4yohdKdR",
       "schedule": "0 3 * * *"
     }
   ]
