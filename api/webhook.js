@@ -1,3 +1,10 @@
+import { parseLineRequest } from '../lib/receipts.js';
+import { createMonthlyHandler } from '../lib/monthly-expenses.js';
+
+export const config = { api: { bodyParser: false } };
+export const maxDuration = 60;
+const handleReceiptEvent = createMonthlyHandler({ downloadLineImage, replyText });
+
 // api/webhook.js
 // LINE Translator + Cashier Bot
 
@@ -8,23 +15,19 @@ const OPENAI_API = 'https://api.openai.com/v1/chat/completions';
 // Cashier LINE group
 const CASHIER_GROUP_ID = 'C1035c01c8ae9076c1a3dc98132c64de5';
 
-// Upstash
-const UPSTASH_REDIS_REST_URL =
-  'https://proud-bluejay-78256.upstash.io';
-
-const UPSTASH_REDIS_REST_TOKEN =
-  'gQAAAAAAATGwAAIgcDEzYmE2NjgxN2U4MTM0ODAwYTEyMTg4MGJhNDFhODgyZQ';
-
-
-// Secret used by the external scheduler.
-const CRON_SECRET = 'mcm-yelXWbVPa-1NygUniWYsDT3o4yohdKdR';
+// Keep credentials only in hosting environment settings.
+const UPSTASH_REDIS_REST_URL = process.env.CASHIER_UPSTASH_REDIS_REST_URL;
+const UPSTASH_REDIS_REST_TOKEN = process.env.CASHIER_UPSTASH_REDIS_REST_TOKEN;
+const CRON_SECRET = process.env.CRON_SECRET;
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     const action = String(req.query?.action || '').trim();
     const key = String(req.query?.key || '').trim();
 
     if (action) {
-      if (key !== CRON_SECRET) {
+      if (process.env.LEGACY_BOTS_ENABLED === 'false') return res.status(200).json({ ok: true, sent: false, reason: 'Legacy bots disabled' });
+      const bearer = req.headers?.authorization;
+      if (!CRON_SECRET || (key !== CRON_SECRET && bearer !== `Bearer ${CRON_SECRET}`)) {
         return res.status(401).json({ ok: false, error: 'Unauthorized' });
       }
 
@@ -45,6 +48,12 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') {
     return res.status(200).send('OK');
+  }
+
+  try {
+    req.body = await parseLineRequest(req);
+  } catch {
+    return res.status(401).json({ ok: false, error: 'Invalid webhook request' });
   }
 
   try {
@@ -85,6 +94,9 @@ async function handleEvent(event) {
     userId: event.source?.userId,
     messageType,
   });
+
+  if (await handleReceiptEvent(event)) return;
+  if (process.env.LEGACY_BOTS_ENABLED === 'false') return;
 
   if (groupId === CASHIER_GROUP_ID) {
     await handleCashierMessage(event);
@@ -1697,7 +1709,8 @@ async function pushText(to, text) {
 async function replyText(
   replyToken,
   text,
-  quickReplyItems = []
+  quickReplyItems = [],
+  quoteToken = null
 ) {
   if (!replyToken || !text) return;
 
@@ -1705,6 +1718,8 @@ async function replyText(
     type: 'text',
     text: String(text).slice(0, 5000),
   };
+
+  if (quoteToken) message.quoteToken = quoteToken;
 
   if (quickReplyItems.length > 0) {
     message.quickReply = {
