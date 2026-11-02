@@ -1,6 +1,9 @@
 # LINE translator, cashier and monthly expense bot
 
 Existing translation, cashier checks and reminders remain in `api/webhook.js`.
+Set `LEGACY_BOTS_ENABLED=false` on the expense project to keep the previously
+disabled translator, cashier and scheduled reminders off.
+
 The optional receipt feature adds monthly expense documents in FlowAccount,
 with one line per receipt and the original image attached. It is disabled by default.
 

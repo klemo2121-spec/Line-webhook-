@@ -25,6 +25,7 @@ export default async function handler(req, res) {
     const key = String(req.query?.key || '').trim();
 
     if (action) {
+      if (process.env.LEGACY_BOTS_ENABLED === 'false') return res.status(200).json({ ok: true, sent: false, reason: 'Legacy bots disabled' });
       const bearer = req.headers?.authorization;
       if (!CRON_SECRET || (key !== CRON_SECRET && bearer !== `Bearer ${CRON_SECRET}`)) {
         return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -95,6 +96,7 @@ async function handleEvent(event) {
   });
 
   if (await handleReceiptEvent(event)) return;
+  if (process.env.LEGACY_BOTS_ENABLED === 'false') return;
 
   if (groupId === CASHIER_GROUP_ID) {
     await handleCashierMessage(event);

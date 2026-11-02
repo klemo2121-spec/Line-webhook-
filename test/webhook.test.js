@@ -17,3 +17,9 @@ test('health check remains available without credentials',async()=>{
 test('missing cron secret fails closed rather than treating empty key as authorized',async()=>{
   const res=response(); await handler({method:'GET',query:{action:'start'},headers:{}},res); assert.equal(res.statusCode,401);
 });
+test('expense-only mode keeps old text bots and scheduled reminders disabled',async()=>{
+  process.env.LEGACY_BOTS_ENABLED='false'; process.env.RECEIPTS_ENABLED='false';
+  const req=Readable.from([Buffer.from(JSON.stringify({events:[{type:'message',source:{groupId:'group'},message:{type:'text',text:'test'},replyToken:'reply'}]}))]); req.method='POST'; req.headers={};
+  const original=globalThis.fetch; globalThis.fetch=async()=>{throw new Error('Old bot unexpectedly called a provider');};
+  try { const res=response(); await handler(req,res); assert.deepEqual(res.value,{ok:true}); const cron=response();await handler({method:'GET',query:{action:'start'},headers:{}},cron);assert.equal(cron.value.sent,false); } finally { globalThis.fetch=original;delete process.env.LEGACY_BOTS_ENABLED; }
+});
