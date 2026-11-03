@@ -10,9 +10,10 @@ const workerId = '11111111-1111-4111-8111-111111111111';
 function setup() {
   let clock = Date.parse('2026-11-03T01:00:00Z'), failSend=false;
   const env={BROWSER_WORKER_ENABLED:'true',EXPENSE_GROUP_IDS:'G',EXPENSE_USER_IDS:'U',FLOWACCOUNT_COMPANY_ID:'7',FLOWACCOUNT_OAUTH_ENCRYPTION_KEY:Buffer.alloc(32,31).toString('base64')};
-  const values=new Map(),lists=new Map(),sent=[];
+  const values=new Map(),lists=new Map(),sent=[],published=[];
   const prefix='line-expenses:browser:v1:';
   async function redis([cmd,...a]) {
+    if(cmd==='PUBLISH'){published.push(a);return 1;}
     if(cmd==='GET')return values.get(a[0])??null;
     if(cmd==='SET'){if(a.includes('NX')&&values.has(a[0]))return null;values.set(a[0],a[1]);return 'OK';}
     if(cmd==='DEL'){let n=0;for(const k of a){n+=values.delete(k)?1:0;}return n;}
@@ -36,7 +37,7 @@ function setup() {
   const work=(action,data={})=>jobs.work(action,{workerId,...data});
   const plan=id=>({id,plan:{companyId:'7',month:'2026-11',bucket:'online',date:'2026-11-30',beforeTotal:0,afterTotal:250,status:'awaiting',paid:0,receipt:{kind:'receipt',readable:true,vendor:'Office supplier',invoiceNumber:'INV1',date:'2026-11-02',currency:'THB',total:250,description:'Office supplies',expenseOnly:true,category:'General expenses',bucket:'online',withholding:0,uncertainties:[]}}});
   const evidence=id=>({id,evidence:{companyId:'7',serial:'EXP2026110002',recordId:'222',date:'2026-11-30',status:'awaiting',paid:0,total:250,marker:`[LINE:${id}]`}});
-  return {env,values,lists,sent,jobs,image,text,work,plan,evidence,prefix,downloads:()=>downloadCount,failSend:v=>{failSend=v;},advance:n=>{clock+=n;}};
+  return {env,values,lists,sent,published,jobs,image,text,work,plan,evidence,prefix,downloads:()=>downloadCount,failSend:v=>{failSend=v;},advance:n=>{clock+=n;}};
 }
 test('browser intake is encrypted, allowlisted, deduplicated and silent until verified completion',async()=>{
   const s=setup(); await s.jobs.intake(s.image('x','other'));assert.equal(s.downloads(),0);
@@ -44,6 +45,7 @@ test('browser intake is encrypted, allowlisted, deduplicated and silent until ve
   const active=await s.work('claim');assert.equal(active.image.base64,Buffer.from('original-1').toString('base64'));
   assert.ok([...s.values.values()].every(v=>!String(v).includes('original-1')&&!String(v).includes('quote-1')));
   await s.jobs.intake(s.image());assert.equal(s.downloads(),1);
+  assert.deepEqual(s.published,[[s.prefix+'wake','receipt']]);
   await assert.rejects(s.work('complete',{id:active.job.id,filename:active.job.filename,attachmentVerified:true,reopened:true}),/not verified/);
 });
 
