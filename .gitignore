@@ -3,4 +3,6 @@
 !.env.example
 node_modules/
 .local/
+__pycache__/
+*.pyc
 

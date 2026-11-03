@@ -83,3 +83,21 @@ test('worker endpoint refuses invalid credentials before reading jobs; browser-o
   const good=res();await endpoint({method:'POST',headers:{authorization:'Bearer '+token},body:{action:'claim'}},good);assert.equal(good.code,200);
   const old={...process.env};try{process.env.BROWSER_WORKER_ENABLED='true';process.env.MCP_CONNECTIONS_ENABLED='false';process.env.RECEIPTS_ENABLED='false';const req=Readable.from(['{"events":[]}']);req.headers={};await assert.rejects(parseLineRequest(req),/signature/);}finally{for(const k of ['BROWSER_WORKER_ENABLED','MCP_CONNECTIONS_ENABLED','RECEIPTS_ENABLED'])if(old[k]===undefined)delete process.env[k];else process.env[k]=old[k];}
 });
+
+test('ZIP fallback requires exact original bytes, complete inventory and the same monthly document',async()=>{
+  const s=setup();await s.jobs.intake(s.image());let {job}=await s.work('claim');const id=job.id;
+  await s.work('plan',s.plan(id));await s.work('write_started',{id});await s.work('saved',s.evidence(id));
+  const archive={filename:'line-2026-11-online-'+ 'c'.repeat(12)+'.zip',sha256:'c'.repeat(64),bytes:1024,limitObserved:true,limitReason:'image_count_limit',limitMessage:'Maximum image attachments reached',inventory:['previous.jpg'],manifest:{version:1,scope:{companyId:'7',month:'2026-11',bucket:'online',recordId:'222',serial:'EXP2026110002'},entries:[
+    {name:'images/0001-'+ 'b'.repeat(12)+'.jpg',sourceName:'previous.jpg',source:'existing',sha256:'b'.repeat(64),bytes:12},
+    {name:'images/0002-'+job.imageHash.slice(0,12)+'.jpg',sourceName:job.filename,source:'current',sha256:job.imageHash,bytes:10},
+  ]}};
+  for(const mutate of [a=>{a.manifest.scope.month='2026-10';},a=>{a.manifest.scope.recordId='999';},a=>{a.manifest.entries.pop();},a=>{a.manifest.entries[1].sha256='a'.repeat(64);},a=>{a.manifest.entries[0].name='../secret.jpg';},a=>{a.limitObserved=false;},a=>{a.inventory.push('missing.png');},a=>{a.limitReason='network_error';},a=>{a.limitMessage='';}]){
+    const bad=structuredClone(archive);mutate(bad);await assert.rejects(s.work('archive_prepared',{id,archive:bad}));
+  }
+  await s.work('archive_prepared',{id,archive});
+  await assert.rejects(s.work('complete',{id,filename:job.filename,attachmentVerified:true,reopened:true}),/Download the saved ZIP/);
+  const completion={id,filename:archive.filename,attachmentVerified:true,reopened:true,archiveSha256:archive.sha256,archiveContentsVerified:true,downloadedAfterReopen:true};
+  await assert.rejects(s.work('complete',{...completion,archiveContentsVerified:false}),/Download/);
+  assert.equal(s.sent.length,0);
+  await s.work('complete',completion);assert.equal(s.sent[0][1],'👍🏻');assert.equal(s.sent[0][2],'quote-1');
+});

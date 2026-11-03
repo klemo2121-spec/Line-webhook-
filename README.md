@@ -26,6 +26,15 @@ Unknown writes block retries, bank slips never create expense lines/payments,
 and the only success reply is a quoted thumb after saved-document and original
 attachment verification. No OpenAPI plan upgrade is required by this path.
 
+Normal image attachment remains the default. A lossless monthly ZIP is permitted
+ONLY after FlowAccount explicitly rejects another image because of its image or
+attachment count limit. It is never generated routinely or for network/browser
+permission errors. The local CLI includes all original images in that exact
+monthly document plus the incoming original, with a manifest and SHA-256 checks.
+Success requires downloading the saved ZIP and verifying every member. It never
+deletes existing attachments; a total file limit that also rejects ZIP blocks the
+job. ZIP-at-limit acceptance has not yet been live-tested.
+
 ## MCP OAuth connection (no OpenAPI client credentials)
 
 The bot can establish its own persistent OAuth connection to the official
