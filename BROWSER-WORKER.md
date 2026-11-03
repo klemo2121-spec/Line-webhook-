@@ -1,5 +1,10 @@
 # Local browser expense worker
 
+The owner switched to a temporary separate-expense MCP route with originals
+remaining in LINE. Use [DIRECT-MCP-WORKER.md](DIRECT-MCP-WORKER.md) for that route.
+Do not restart the browser runner or resume this older procedure automatically.
+The instructions below remain for auditing/recovery of its earlier operations.
+
 The LINE webhook stores allowed image messages in an encrypted, bounded queue.
 The local worker claims the oldest job using a DPAPI-protected credential.
 The active local runner uses its dedicated, manually authenticated Chrome profile.
@@ -35,8 +40,16 @@ alter a completed expense or process an already-corrected job a second time.
 
 Before a write, persist the exact pre-existing row texts in the private job
 folder. Unknown writes remain locked. The private `verify` command accepts only
-the matching unfinished bank-proof job and performs read-only saved-document
-verification; it never saves, adds a line or uploads another attachment.
+the matching unfinished job and performs read-only saved-document verification.
+Expense lines additionally require the persisted pre-write baseline. It never
+saves, adds a line or uploads another image. The separate operator repair for a
+proved zero-price line requires the same single marker, quantity, category and
+unchanged old total. It updates that row in place and verifies the expected total
+before saving. Unknown results stay blocked.
+
+Numeric controls must receive real key events and Tab, then the displayed grand
+total must match the plan **before** any Save. Filling a numeric input alone does
+not reliably update FlowAccount's calculated model.
 
 ### Saved image verification
 

@@ -17,7 +17,7 @@ class ReceiptImageTests(unittest.TestCase):
         self.saved = Path(self.temp.name) / 'saved.jpg'
         image = Image.new('RGB', (400, 500), 'white')
         draw = ImageDraw.Draw(image)
-        draw.text((40, 80), 'BLUEPAY 3924.00 THB\n02-11-2026\nInvoice 202611021004833', fill='black')
+        draw.text((40, 80), 'DEMO SUPPLIER 42.00 THB\n02-11-2026\nInvoice TEST-1234', fill='black')
         image.save(self.original, quality=95)
 
     def test_identical_bytes(self):

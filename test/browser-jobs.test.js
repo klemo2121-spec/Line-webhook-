@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import { createBrowserJobs } from '../lib/browser-jobs.js';
 import { createWorkerEndpoint } from '../api/browser-worker.js';
 import { parseLineRequest } from '../lib/receipts.js';
+import {directConfig,directReceipt} from './direct-expense-fixture.js';
 
 const workerId = '11111111-1111-4111-8111-111111111111';
 function setup() {
@@ -42,6 +43,36 @@ function setup() {
   return {env,values,lists,sent,published,jobs,image,text,work,plan,evidence,prefix,downloads:()=>downloadCount,failSend:v=>{failSend=v;},advance:n=>{clock+=n;}};
 }
 
+test('individual MCP workflow needs explicit photo policy, blocks browser writes and acknowledges only verified records',async()=>{
+  const s=setup();await assert.rejects(s.work('direct_claim'),/not been configured/);
+  await s.work('direct_configure',{config:directConfig()});
+  assert.ok([...s.values.values()].every(v=>!String(v).includes('Alex Example')));
+  await assert.rejects(s.work('claim'),/Browser recording is disabled/);
+  await s.jobs.intake(s.image('direct'));const {job}=await s.work('direct_claim');
+  assert.equal(job.workflow,'mcp_individual_v1');assert.equal(job.status,'claimed');
+  await assert.rejects(s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:999}}),/matching MCP preview/);
+  const p=await s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:250}});
+  await assert.rejects(s.work('direct_complete',{id:job.id,documentVerified:true}),/independently verified/);
+  await s.work('direct_write_started',{id:job.id});
+  await s.work('direct_created',{id:job.id,creation:{companyId:'7',recordId:'22',serial:'EXP2026110004',idempotencyKey:'test-key'}});
+  await assert.rejects(s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:250}}),/cannot be replanned/);
+  const evidence={companyId:'7',recordId:'22',serial:'EXP2026110004',date:'2026-11-02',status:'awaiting',paid:0,total:250,reference:p.plan.reference,marker:p.plan.marker,markerCount:1,lineCount:1,categoryId:11,vat:0,withholding:0,discount:0};
+  await assert.rejects(s.work('direct_saved',{id:job.id,evidence:{...evidence,recordId:'23'}}),/exact created document/);
+  await s.work('direct_saved',{id:job.id,evidence});assert.equal(s.sent.length,0);
+  await s.work('direct_complete',{id:job.id,documentVerified:true});
+  assert.equal(s.sent.length,1);assert.equal(s.sent[0][1],'👍🏻');assert.equal(s.sent[0][2],job.quoteToken);
+  assert.deepEqual(await s.work('direct_claim'),{idle:true});
+});
+
+test('individual mode preserves legacy receipts and refuses a rephotographed recorded reference',async()=>{
+  const s=setup();await s.jobs.intake(s.image('old'));const {job}=await s.work('claim');
+  await s.work('plan',s.plan(job.id));await s.work('write_started',{id:job.id});await s.work('saved',s.evidence(job.id));
+  await s.work('complete',{id:job.id,filename:job.filename,attachmentVerified:true,reopened:true});
+  await s.work('direct_configure',{config:{...directConfig(),previouslyRecordedJobIds:[job.id]}});
+  await s.jobs.intake(s.image('different-photo'));const next=await s.work('direct_claim');
+  await assert.rejects(s.work('direct_plan',{id:next.job.id,receipt:{...directReceipt(),vendor:'Different OCR spelling',invoiceNumber:'INV1'},preview:{valid:true,total:250}}),/already recorded/);
+});
+
 test('owner can register a previously attachment-only slip once, preserving image, amount, document and prior audit',async()=>{
   const s=setup();await s.jobs.intake(s.image('confirmed-slip'));const {job}=await s.work('claim');
   const receipt={...s.plan(job.id).plan.receipt,kind:'payment_slip',total:3924,expenseOnly:false,category:'unknown'};
@@ -53,6 +84,7 @@ test('owner can register a previously attachment-only slip once, preserving imag
   await assert.rejects(s.work('confirm_expense',{id:job.id,bucket:'electricity',ownerInstruction:'wrong document'}),/bucket/);
   await s.work('confirm_expense',{id:job.id,bucket:'online',ownerInstruction:'online business purchases'});
   const next=await s.work('claim');assert.equal(next.job.id,job.id);assert.equal(next.job.filename,job.filename);
+  assert.equal(next.job.override.bucket,'online');
   assert.equal(next.job.attachmentOnlyCompletion.evidence.total,949);assert.equal(next.job.confirmedExpense.source,'owner_chat');
   const expense={...receipt,kind:'receipt',sourceKind:'payment_slip',ownerConfirmedExpense:true,expenseOnly:true,category:'General expenses'};
   const fixed={...plan,receipt:expense,afterTotal:4873};

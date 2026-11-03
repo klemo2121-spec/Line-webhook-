@@ -13,6 +13,9 @@ test('browser navigation resets pagination and reads role-based rows through the
     page.setDefaultTimeout(15000);
     await page.route('**/*',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:`<html><head><meta charset="utf-8"></head><body>
       <a href="/N270466/business/expenses">Expenses</a><button>สร้างใหม่</button>
+      <div role="dialog" id="preview"><button onclick="document.getElementById('preview').remove()">Close</button><button>Download</button></div>
+      <div id="documentForm"><button disabled>Save</button><button onclick="document.getElementById('documentForm').remove()">Close window</button></div>
+      <input id="price" value="0" onkeyup="document.getElementById('amount').innerText=this.value"><span id="amount">0</span>
       <div role="columnheader"><span class="multiple" onclick="document.getElementById('sort').className='sort-btn sort-desc'">วันที่</span><span id="sort" class="sort-btn sort-unset"></span></div><div role="table"><div id="rows"></div></div>
       <li id="first"><button aria-label="go to first page" onclick="i=0;draw()">First</button></li>
       <li id="next"><button aria-label="go to next page" onclick="if(i<1){i++;draw()}">Next</button></li>
@@ -22,5 +25,8 @@ test('browser navigation resets pagination and reads role-based rows through the
     const driver=new FlowBrowserRunner(page,'N270466',{registerEngine:false});
     const target=await driver.findTarget({month:'2026-11',bucket:'online'});
     assert.equal(target.serial,'EXP2026110001');assert.equal(target.total,949);
+    assert.equal(await page.locator('#preview').count(),0);assert.equal(await page.locator('#documentForm').count(),0);
+    await driver.enterNumber(page.locator('#price'),3924);
+    assert.equal(await page.locator('#amount').innerText(),'3924');
   }finally{await browser.close();}
 });
