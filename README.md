@@ -9,6 +9,23 @@ Legacy bots also stay off when that variable is absent; they require an explicit
 The optional receipt feature adds monthly expense documents in FlowAccount,
 with one line per receipt and the original image attached. It is disabled by default.
 
+## Local browser path without OpenAPI
+
+`BROWSER_WORKER_ENABLED=true` switches the allowlisted expense group to an
+encrypted durable queue, exclusively bypassing the OpenAPI handler. A local
+Codex browser workflow claims jobs using a Windows DPAPI-protected token. See
+`BROWSER-WORKER.md` for setup, exact UI procedure and recovery rules.
+
+This path needs the computer, Codex app, Chrome extension and FlowAccount login
+available. It is not a standalone background browser daemon. It is disabled by
+default and must pass a live attachment/save/reopen test before unattended runs
+are enabled. A successful mock test or a connected MCP account is not that test.
+Queued month instructions work; changes after processing has started currently
+require reconciliation rather than automatically moving saved expense lines.
+Unknown writes block retries, bank slips never create expense lines/payments,
+and the only success reply is a quoted thumb after saved-document and original
+attachment verification. No OpenAPI plan upgrade is required by this path.
+
 ## MCP OAuth connection (no OpenAPI client credentials)
 
 The bot can establish its own persistent OAuth connection to the official
@@ -181,3 +198,4 @@ Primary API references:
 - https://github.com/flowaccount/flowaccount-openapi-sdk-php/blob/main/docs/Api/ExpensesApi.md
 - https://developers.line.biz/en/docs/messaging-api/get-quote-tokens/
 - https://developers.line.biz/en/docs/messaging-api/sending-messages/
+

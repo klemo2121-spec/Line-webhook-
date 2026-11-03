@@ -1,11 +1,14 @@
 import { parseLineRequest } from '../lib/receipts.js';
 import { createMonthlyHandler } from '../lib/monthly-expenses.js';
 import { createLineFlowAccount } from '../lib/line-flowaccount.js';
+import { createBrowserJobs } from '../lib/browser-jobs.js';
+import { pushBrowserMessage } from '../lib/line-push.js';
 
 export const config = { api: { bodyParser: false } };
 export const maxDuration = 60;
 const handleReceiptEvent = createMonthlyHandler({ downloadLineImage, replyText });
 const handleFlowAccountConnection = createLineFlowAccount({ replyText });
+const browserJobs = createBrowserJobs({ downloadLineImage, send:pushBrowserMessage });
 
 // api/webhook.js
 // LINE Translator + Cashier Bot
@@ -98,6 +101,9 @@ async function handleEvent(event) {
   });
 
   if (await handleFlowAccountConnection(event)) return;
+  if (await browserJobs.intake(event)) return;
+  // Browser mode exclusively owns this group; never fall through to OpenAPI.
+  if (process.env.BROWSER_WORKER_ENABLED === 'true' && String(process.env.EXPENSE_GROUP_IDS || '').split(',').map(s => s.trim()).includes(groupId)) return;
   if (await handleReceiptEvent(event)) return;
   if (process.env.LEGACY_BOTS_ENABLED !== 'true') return;
 
@@ -1919,3 +1925,4 @@ function extractJson(text) {
     }
   }
 }
+
