@@ -68,3 +68,9 @@ An untouched reviewed duplicate may be removed from the active queue with
 `browser-worker.mjs dismiss FILE`, reason `user_confirmed_no_action`, only after
 the human actually confirms no action. It creates no accounting change and sends
 no thumbs-up. Unknown financial writes can never be dismissed by this action.
+
+## Automatic pilot authorization
+
+After read-only preflight passed, the user explicitly requested automatic pilot activation now and clarification questions in the source LINE group. This supersedes the earlier waiting-for-supervised-success activation recommendation above, not the prohibition on payments or uncertain-write replay. Readiness metadata must state preflight-only verification and that full standalone financial success is not yet established. No OS startup task is installed.
+
+runner-review-monitor.mjs watches local status without AI. For an untouched unclear receipt it invokes request_info, asks in the original LINE group with a stable retry key, parks that job, and restarts the existing browser command loop. It cannot release planned or uncertain financial writes; other failures remain blocked. The current BLUEPAY 3924 THB slip was specified as online shopping by the user but still lacks purchase detail; the group question requests a purchase receipt rather than guessing a new expense from a transfer.

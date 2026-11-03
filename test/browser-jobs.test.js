@@ -66,6 +66,21 @@ test('reviewed non-receipt rejection requires the exact image and cannot discard
   await s.jobs.intake(s.image('planned'));const next=await s.work('claim');await s.work('plan',s.plan(next.job.id));await s.work('fail',{id:next.job.id,reason:'Unknown'});
   await assert.rejects(s.work('reject_non_receipt',{id:next.job.id,imageHash:next.job.imageHash}),/untouched/);
 });
+
+test('missing purchase details asks in the source LINE group and leaves later receipts processable',async()=>{
+  const s=setup();await s.jobs.intake(s.image('unclear'));const {job}=await s.work('claim');
+  await s.work('fail',{id:job.id,reason:'Receipt needs review'});await s.work('request_info',{id:job.id});
+  assert.equal(s.sent.length,1);assert.equal(s.sent[0][0],'G');assert.equal(s.sent[0][2],'quote-unclear');assert.notEqual(s.sent[0][1],'👍🏻');
+  await s.jobs.intake(s.image('next'));const next=await s.work('claim');assert.notEqual(next.job.id,job.id);
+  await s.work('plan',s.plan(next.job.id));await s.work('write_started',{id:next.job.id});
+  await assert.rejects(s.work('request_info',{id:next.job.id}),/reconciliation/);
+});
+
+test('untouched review may receive a validated plan, but uncertain writes cannot be replanned',async()=>{
+  const s=setup();await s.jobs.intake(s.image());const {job}=await s.work('claim');await s.work('fail',{id:job.id,reason:'Missing context'});
+  await s.work('plan',s.plan(job.id));await s.work('write_started',{id:job.id});await s.work('fail',{id:job.id,reason:'Unknown save'});
+  await assert.rejects(s.work('plan',s.plan(job.id)),/replanned/);
+});
 test('month instructions are evaluated on arrival, scoped and applied before claim',async()=>{
   const s=setup();await s.jobs.intake(s.text('הקבלה הבאה לחודש שעבר'));await s.jobs.intake(s.image());
   const c=await s.work('claim');assert.equal(c.job.override.month,'2026-10');
