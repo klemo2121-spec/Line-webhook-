@@ -14,6 +14,7 @@ function setup() {
   const prefix='line-expenses:browser:v1:';
   async function redis([cmd,...a]) {
     if(cmd==='PUBLISH'){published.push(a);return 1;}
+    if(cmd==='SCAN')return ['0',[]];
     if(cmd==='GET')return values.get(a[0])??null;
     if(cmd==='SET'){if(a.includes('NX')&&values.has(a[0]))return null;values.set(a[0],a[1]);return 'OK';}
     if(cmd==='DEL'){let n=0;for(const k of a){n+=values.delete(k)?1:0;}return n;}
@@ -21,6 +22,7 @@ function setup() {
     if(cmd==='LINDEX')return (lists.get(a[0])||[])[Number(a[1])]??null;
     if(cmd==='LREM'){const list=lists.get(a[0])||[];const filtered=list.filter(v=>v!==a[2]);lists.set(a[0],filtered);return list.length-filtered.length;}
     if(cmd==='EVAL') {
+      if(a[1]==='2'){values.set(a[2],a[4]);lists.set(a[3],[...(lists.get(a[3])||[]),a[5]]);return 1;}
       if(a[1]==='3')return 1; // image-budget reservation; tested against real Redis separately.
       if(a[1]==='5') {
         const k=a.slice(2,7),v=a.slice(7);
@@ -80,6 +82,24 @@ test('untouched review may receive a validated plan, but uncertain writes cannot
   const s=setup();await s.jobs.intake(s.image());const {job}=await s.work('claim');await s.work('fail',{id:job.id,reason:'Missing context'});
   await s.work('plan',s.plan(job.id));await s.work('write_started',{id:job.id});await s.work('fail',{id:job.id,reason:'Unknown save'});
   await assert.rejects(s.work('plan',s.plan(job.id)),/replanned/);
+});
+
+test('owner clarification resumes the same untouched image once, retains text/month and wakes the worker',async()=>{
+  const s=setup();await s.jobs.intake(s.image('ask'));const {job}=await s.work('claim');await s.work('request_info',{id:job.id});
+  const answer=s.text('ציוד למשרד לחודש שעבר');await s.jobs.intake(answer);await s.jobs.intake(answer);
+  const resumed=await s.work('claim');assert.equal(resumed.job.id,job.id);assert.equal(resumed.job.override.month,'2026-10');assert.equal(resumed.job.answers.length,1);assert.equal(resumed.job.answers[0].text,answer.message.text);
+  assert.equal(s.lists.get(s.prefix+'pending').length,1);assert.equal(s.published.at(-1)[1],'clarification');
+});
+test('free-text question answers are owner-scoped and cannot modify writing/completed jobs',async()=>{
+  const s=setup();await s.jobs.intake(s.image('ask'));const {job}=await s.work('claim');await s.work('request_info',{id:job.id});
+  const other=s.text('office supplies');other.source.userId='other';await s.jobs.intake(other);assert.deepEqual(await s.work('claim'),{idle:true});
+  const answer=s.text('office supplies');await s.jobs.intake(answer);const resumed=await s.work('claim');assert.equal(resumed.job.answers[0].text,'office supplies');
+  await s.work('plan',s.plan(job.id));await s.work('write_started',{id:job.id});assert.equal(await s.jobs.intake(s.text('free form change')),false);assert.equal((await s.work('claim')).job.status,'writing');
+});
+test('operator resume uses existing untouched parked image and cannot race an active task',async()=>{
+  const s=setup();await s.jobs.intake(s.image('ask'));const {job}=await s.work('claim');await s.work('request_info',{id:job.id});
+  await s.work('resume_info',{id:job.id,bucket:'online',ownerInstruction:'קניות אונליין'});const next=await s.work('claim');assert.equal(next.job.id,job.id);assert.equal(next.job.override.bucket,'online');
+  await assert.rejects(s.work('resume_info',{id:job.id,bucket:'online'}),/active/);
 });
 test('month instructions are evaluated on arrival, scoped and applied before claim',async()=>{
   const s=setup();await s.jobs.intake(s.text('הקבלה הבאה לחודש שעבר'));await s.jobs.intake(s.image());

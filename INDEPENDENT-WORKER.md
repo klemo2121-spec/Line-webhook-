@@ -74,3 +74,11 @@ no thumbs-up. Unknown financial writes can never be dismissed by this action.
 After read-only preflight passed, the user explicitly requested automatic pilot activation now and clarification questions in the source LINE group. This supersedes the earlier waiting-for-supervised-success activation recommendation above, not the prohibition on payments or uncertain-write replay. Readiness metadata must state preflight-only verification and that full standalone financial success is not yet established. No OS startup task is installed.
 
 runner-review-monitor.mjs watches local status without AI. For an untouched unclear receipt it invokes request_info, asks in the original LINE group with a stable retry key, parks that job, and restarts the existing browser command loop. It cannot release planned or uncertain financial writes; other failures remain blocked. The current BLUEPAY 3924 THB slip was specified as online shopping by the user but still lacks purchase detail; the group question requests a purchase receipt rather than guessing a new expense from a transfer.
+
+## Clarification engine v2
+
+Awaiting-info answers are stored encrypted with the same owner's original image and requeued atomically; unknown text outside an outstanding owner question is ignored. Financial plans/writes cannot be changed by free-text answers. Replayed answer IDs do not duplicate queue entries. The image reader receives the owner's answers as bounded classification context.
+
+The live engine adopts the existing dedicated Playwright page through the adapter's setup hook, with no CDP attachment, password/cookie copy or browser restart. The old CLI claim loop stops at a safe queue boundary when the private engine-handoff flag is set. Only one engine owns processing. Operator control uses engine-command.json; runner-command.json stays for read-only setup. Old review monitor must stop before handoff.
+
+A bank proof with an owner-specified monthly group can only attach to an existing awaiting document; missing purchase-purpose/category is irrelevant to attachment-only proof. Amount, date, currency, image and vendor uncertainties remain blockers. Bank proofs never create expense lines or payments. Full original attachment download/hash and quoted completion checks still apply.
