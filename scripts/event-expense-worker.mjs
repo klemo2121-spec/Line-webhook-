@@ -35,12 +35,13 @@ const worker=async(action,input)=>{
   return data;
 },gateway=(action,input)=>rpc('/api/direct-mcp',action,input);
 const mode=process.argv[2];
-if(!['check','start','once'].includes(mode))throw Error('Use check | start | once');
+if(!['check','connect','start','once'].includes(mode))throw Error('Use check | connect | start | once');
+if(mode==='connect'){console.log(JSON.stringify(await gateway('request_connection')));process.exit(0);}
 if(mode==='check'){
-  const mcp=await gateway('preflight');
-  const response=await fetch('https://api.openai.com/v1/models/'+encodeURIComponent(model),{redirect:'error',signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${secrets.apiKey}`}});
-  if(!response.ok)throw Error(`Configured AI reader unavailable (${response.status})`);
-  console.log(JSON.stringify({...mcp,aiModel:model,apiCredential:true,quotaVerified:false,automaticProcessing:false}));process.exit(0);
+  const checks=await Promise.allSettled([gateway('preflight'),fetch('https://api.openai.com/v1/models/'+encodeURIComponent(model),{redirect:'error',signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${secrets.apiKey}`}})]);
+  const [mcp,ai]=checks,aiReady=ai.status==='fulfilled'&&ai.value.ok;
+  console.log(JSON.stringify({...(mcp.status==='fulfilled'?mcp.value:{ready:false,reason:String(mcp.reason.message).slice(0,250)}),aiModel:model,apiCredential:aiReady,quotaVerified:false,automaticProcessing:false}));
+  process.exit(mcp.status==='fulfilled'&&aiReady?0:1);
 }
 const lockPath=path.join(local,'worker.lock');
 let lock;
@@ -70,10 +71,17 @@ const processor=createEventExpenseProcessor({worker,gateway,extract:createReceip
 const stop=new AbortController();
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>stop.abort());
 try{
-  await gateway('preflight');
-  if(mode==='once'){await processor.drain();}
-  else{
+  let connected=false;
+  async function whenConnected(){
+    if(!connected){
+      try{await gateway('preflight');connected=true;}
+      catch(error){await state({state:'waiting_connection',reason:String(error.message).slice(0,250)});return;}
+    }
     await processor.drain();
+  }
+  if(mode==='once'){await gateway('preflight');await processor.drain();}
+  else{
+    await whenConnected();
     let failures=0;
     while(!stop.signal.aborted){
       try{
@@ -84,7 +92,7 @@ try{
         const decoder=new TextDecoder();let tail='';
         for await(const bytes of response.body){
           const parsed=parseWakeFrames(tail,decoder.decode(bytes,{stream:true}));tail=parsed.tail;
-          if(parsed.wake){await processor.drain();failures=0;}
+          if(parsed.wake){await whenConnected();failures=0;}
         }
       }catch(error){
         if(stop.signal.aborted)break;

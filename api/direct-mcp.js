@@ -4,7 +4,7 @@ import {pushBrowserMessage} from '../lib/line-push.js';
 import {createDirectMcpGateway,ReceiptQuestion} from '../lib/direct-mcp-gateway.js';
 
 export const maxDuration=60;
-export function createDirectMcpEndpoint({env=process.env,jobs=createBrowserJobs({env,send:pushBrowserMessage}),gateway=createDirectMcpGateway({env,jobs})}={}){
+export function createDirectMcpEndpoint({env=process.env,jobs=createBrowserJobs({env,send:pushBrowserMessage}),gateway=createDirectMcpGateway({env,jobs,send:pushBrowserMessage})}={}){
   return async(req,res)=>{
     res.setHeader('Cache-Control','no-store');
     if(env.BROWSER_WORKER_ENABLED!=='true')return res.status(404).json({error:'Not found'});

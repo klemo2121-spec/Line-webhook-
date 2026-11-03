@@ -161,3 +161,15 @@ test('creation response accepts the actual gateway key and refuses another compa
 test('native contact projection resolves the returned local name from data.list',()=>{
   assert.deepEqual(contactRows({data:{list:[{id:'77',nameLocal:'Demo supplier'}]}}),[{id:'77',name:'Demo supplier'}]);
 });
+test('connection link uses the sole configured owner and sends no financial request',async()=>{
+  const sent=[],actors=[];
+  const gateway=createDirectMcpGateway({env:{FLOWACCOUNT_COMPANY_ID:'7',EXPENSE_GROUP_IDS:'G',EXPENSE_USER_IDS:'U'},jobs:{},oauth:{start:async actor=>{actors.push(actor);return 'https://mcp.flowaccount.com/authorize?state=test';}},send:async(...args)=>sent.push(args),createClient:()=>{throw Error('No MCP call before consent');}});
+  assert.equal((await gateway('request_connection',{workerId})).sent,true);
+  assert.deepEqual(actors,[{groupId:'G',userId:'U'}]);assert.equal(sent[0][0],'G');assert.match(sent[0][1],/https:\/\/mcp.flowaccount.com/);
+});
+test('arrival-time owner purpose and previous-month instruction classify a slip without changing its printed date',()=>{
+  const current=directCurrent();current.job.override={month:'2026-10',purpose:'Rent for last month'};
+  const receipt={...directReceipt(),kind:'payment_slip',category:'unknown',purpose:null,descriptionEnglish:'Transfer',expenseOnly:false,uncertainties:['unknown_purpose','unknown_category']};
+  const plan=buildDirectExpensePlan(receipt,current,directConfig());
+  assert.equal(plan.document.items[0].name,'Rent');assert.equal(plan.date,'2026-10-31');assert.equal(plan.receipt.date,'2026-11-02');
+});

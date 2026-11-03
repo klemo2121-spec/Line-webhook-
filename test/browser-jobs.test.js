@@ -101,6 +101,15 @@ test('question delivery failure resumes using the same retry key and never write
   assert.equal((await s.work('inspect',{id:job.id})).hasPlan,false);
 });
 
+test('month instruction during image reading applies until the immutable plan is stored',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('late-month'));
+  const {job}=await s.work('direct_claim');await s.jobs.intake(s.text('לחודש שעבר',{quotedMessageId:job.messageId}));
+  const result=await s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:250}});
+  assert.equal(result.plan.date,'2026-10-31');
+  await s.jobs.intake(s.text('לחודש הזה',{quotedMessageId:job.messageId}));
+  assert.equal((await s.work('direct_context',{id:job.id})).job.plan.date,'2026-10-31');
+});
+
 test('owner can register a previously attachment-only slip once, preserving image, amount, document and prior audit',async()=>{
   const s=setup();await s.jobs.intake(s.image('confirmed-slip'));const {job}=await s.work('claim');
   const receipt={...s.plan(job.id).plan.receipt,kind:'payment_slip',total:3924,expenseOnly:false,category:'unknown'};

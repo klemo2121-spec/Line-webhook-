@@ -13,6 +13,9 @@ Run with the bundled Node:
   verify API credit balance or prove an actual receipt was saved.
 - `scripts/event-expense-worker.mjs start`: one persistent event listener. Keep
   this computer on and connected. A process lock prevents duplicate instances.
+- `scripts/event-expense-worker.mjs connect`: sends one fresh official OAuth
+  authorization link to the configured owner's expense LINE group. This requires
+  exactly one allowed group and owner; no credentials or approval are invented.
 - `scripts/event-expense-worker.mjs once`: operator recovery of the same queue,
   with the same safeguards. Never run alongside another worker.
 
@@ -21,6 +24,9 @@ CurrentUser DPAPI files. The AI reader preserves the existing model and reserves
 at most 25 requests per Bangkok day before contacting the API, with no automatic
 model-call retry or billing top-up. Extraction is cached per original image and
 owner answers. Runtime and private payee rules stay in ignored `.local/`.
+If the standalone OAuth connection is missing, the listener waits without reading
+images or creating expenses. A successful verified OAuth callback publishes a
+connection event so queued work can resume after the owner authorizes FlowAccount.
 
 ## Accounting
 
