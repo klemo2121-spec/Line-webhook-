@@ -12,7 +12,7 @@ const python = process.env.BROWSER_WORKER_PYTHON || path.join(process.env.USERPR
 const { stdout:token } = await promisify(execFile)(python,[keyScript,'read'],{windowsHide:true});
 if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw Error('Invalid protected worker credential');
 const [command, inputPath] = process.argv.slice(2);
-let action = ({claim:'claim',plan:'plan','write-started':'write_started',saved:'saved',complete:'complete',fail:'fail',archive:'archive_prepared','archive-complete':'complete'})[command];
+let action = ({claim:'claim',plan:'plan','write-started':'write_started',saved:'saved',complete:'complete',fail:'fail',dismiss:'dismiss',archive:'archive_prepared','archive-complete':'complete'})[command];
 if (!action) throw Error('Use claim | plan FILE | write-started FILE | saved FILE | archive FILE | archive-complete FILE | complete FILE | fail FILE');
 let input = {};
 if (action !== 'claim') {

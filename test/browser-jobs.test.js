@@ -46,6 +46,16 @@ test('browser intake is encrypted, allowlisted, deduplicated and silent until ve
   await s.jobs.intake(s.image());assert.equal(s.downloads(),1);
   await assert.rejects(s.work('complete',{id:active.job.id,filename:active.job.filename,attachmentVerified:true,reopened:true}),/not verified/);
 });
+
+test('confirmed untouched review can be dismissed without acknowledgement; uncertain writes remain blocked',async()=>{
+  const s=setup();await s.jobs.intake(s.image('review'));const {job}=await s.work('claim');
+  await s.work('fail',{id:job.id,reason:'Existing paid document; human confirmed no action'});
+  assert.equal((await s.work('claim')).blocked,true);
+  assert.deepEqual(await s.work('dismiss',{id:job.id,reason:'user_confirmed_no_action'}),{dismissed:job.id});
+  assert.equal(s.sent.length,0);assert.deepEqual(await s.work('claim'),{idle:true});
+  await s.jobs.intake(s.image('uncertain'));const next=await s.work('claim');await s.work('plan',s.plan(next.job.id));await s.work('write_started',{id:next.job.id});await s.work('fail',{id:next.job.id,reason:'Unknown save outcome'});
+  await assert.rejects(s.work('dismiss',{id:next.job.id,reason:'user_confirmed_no_action'}),/untouched/);
+});
 test('month instructions are evaluated on arrival, scoped and applied before claim',async()=>{
   const s=setup();await s.jobs.intake(s.text('הקבלה הבאה לחודש שעבר'));await s.jobs.intake(s.image());
   const c=await s.work('claim');assert.equal(c.job.override.month,'2026-10');
