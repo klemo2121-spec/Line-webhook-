@@ -16,7 +16,7 @@ if(command==='claim'){
   const handoff=JSON.parse(await readFile(path.join(root,'engine-handoff.json'),'utf8').catch(()=>'{}'));
   if(handoff.enabled===true)throw Error('Live engine handoff requested; preserve the browser and financial state');
 }
-let action = ({claim:'claim',inspect:'inspect','resume-info':'resume_info',plan:'plan','write-started':'write_started',saved:'saved',complete:'complete',fail:'fail',dismiss:'dismiss','request-info':'request_info','reject-non-receipt':'reject_non_receipt',archive:'archive_prepared','archive-complete':'complete'})[command];
+let action = ({claim:'claim',inspect:'inspect','confirm-expense':'confirm_expense','resume-info':'resume_info',plan:'plan','write-started':'write_started',saved:'saved',complete:'complete',fail:'fail',dismiss:'dismiss','request-info':'request_info','reject-non-receipt':'reject_non_receipt',archive:'archive_prepared','archive-complete':'complete'})[command];
 if (!action) throw Error('Use claim | plan FILE | write-started FILE | saved FILE | archive FILE | archive-complete FILE | complete FILE | fail FILE');
 let input = {};
 if (action !== 'claim') {

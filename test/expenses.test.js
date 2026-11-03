@@ -4,7 +4,11 @@ import { Readable } from 'node:stream';
 import { createHmac } from 'node:crypto';
 import { parseMonthInstruction } from '../lib/months.js';
 import { parseLineRequest, validateReceipt } from '../lib/receipts.js';
-import { createMonthlyHandler, monthlyPayload, receiptErrors } from '../lib/monthly-expenses.js';
+import { createMonthlyHandler, monthlyPayload, receiptErrors, parseBucket } from '../lib/monthly-expenses.js';
+
+test('online shopping accepts the owner spelling with spaces and hyphens',()=>{
+  for(const text of ['קניות און ליין','קניות אונליין','קניות און-ליין','קניות און־ליין'])assert.equal(parseBucket(text),'online');
+});
 
 const category = { systemCode: 1038, categoryId: 100, nameLocal: 'ทั่วไป', nameForeign: 'General', creditId: 101, creditCode: '21399', creditCategory: 2, creditNameLocal: 'เจ้าหนี้', creditNameForeign: 'Payables', debitId: 102, debitCode: '59910', debitCategory: 5, debitNameLocal: 'ค่าใช้จ่าย', debitNameForeign: 'Expenses' };
 const receipt = { kind: 'receipt', readable: true, vendor: 'Supplier', invoiceNumber: 'R1', date: '2026-11-02', currency: 'THB', total: 107, net: 100, vat: 7, taxTreatment: 'standard7', withholding: 0, expenseOnly: true, description: 'Courier', category: 'General', bucket: 'petty_cash', uncertainties: [] };
@@ -148,3 +152,4 @@ test('other sender cannot retarget a quoted receipt',async()=>{
 test('disabled feature passes all events through without API calls',async()=>{
   const s=setup(); process.env.RECEIPTS_ENABLED='false'; assert.equal(await s.handle(s.image('1')),false); assert.equal(s.calls.length,0);
 });
+

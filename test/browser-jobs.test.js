@@ -41,6 +41,28 @@ function setup() {
   const evidence=id=>({id,evidence:{companyId:'7',serial:'EXP2026110002',recordId:'222',date:'2026-11-30',status:'awaiting',paid:0,total:250,marker:`[LINE:${id}]`}});
   return {env,values,lists,sent,published,jobs,image,text,work,plan,evidence,prefix,downloads:()=>downloadCount,failSend:v=>{failSend=v;},advance:n=>{clock+=n;}};
 }
+
+test('owner can register a previously attachment-only slip once, preserving image, amount, document and prior audit',async()=>{
+  const s=setup();await s.jobs.intake(s.image('confirmed-slip'));const {job}=await s.work('claim');
+  const receipt={...s.plan(job.id).plan.receipt,kind:'payment_slip',total:3924,expenseOnly:false,category:'unknown'};
+  const plan={...s.plan(job.id).plan,receipt,beforeTotal:949,afterTotal:949,serial:'EXP2026110001'};
+  await s.work('plan',{id:job.id,plan});await s.work('write_started',{id:job.id});
+  await assert.rejects(s.work('confirm_expense',{id:job.id,bucket:'online',ownerInstruction:'online business purchases'}),/active/);
+  const evidence={...s.evidence(job.id).evidence,serial:plan.serial,total:949};delete evidence.marker;
+  await s.work('saved',{id:job.id,evidence});await s.work('complete',{id:job.id,filename:job.filename,attachmentVerified:true,reopened:true});
+  await assert.rejects(s.work('confirm_expense',{id:job.id,bucket:'electricity',ownerInstruction:'wrong document'}),/bucket/);
+  await s.work('confirm_expense',{id:job.id,bucket:'online',ownerInstruction:'online business purchases'});
+  const next=await s.work('claim');assert.equal(next.job.id,job.id);assert.equal(next.job.filename,job.filename);
+  assert.equal(next.job.attachmentOnlyCompletion.evidence.total,949);assert.equal(next.job.confirmedExpense.source,'owner_chat');
+  const expense={...receipt,kind:'receipt',sourceKind:'payment_slip',ownerConfirmedExpense:true,expenseOnly:true,category:'General expenses'};
+  const fixed={...plan,receipt:expense,afterTotal:4873};
+  await assert.rejects(s.work('plan',{id:job.id,plan:{...fixed,receipt:{...expense,total:999},afterTotal:1948}}),/preserve original/);
+  await s.work('plan',{id:job.id,plan:fixed});await s.work('write_started',{id:job.id});
+  await s.work('saved',{id:job.id,evidence:{...evidence,total:4873,marker:`[LINE:${job.id}]`}});
+  await s.work('complete',{id:job.id,filename:job.filename,attachmentVerified:true,reopened:true});
+  await assert.rejects(s.work('confirm_expense',{id:job.id,bucket:'online',ownerInstruction:'again'}),/only a completed/i);
+  assert.deepEqual(await s.work('claim'),{idle:true});assert.equal(s.downloads(),1);
+});
 test('browser intake is encrypted, allowlisted, deduplicated and silent until verified completion',async()=>{
   const s=setup(); await s.jobs.intake(s.image('x','other'));assert.equal(s.downloads(),0);
   await s.jobs.intake(s.image());assert.equal(s.sent.length,0);

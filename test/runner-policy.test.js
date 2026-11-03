@@ -8,9 +8,20 @@ test('unreadable, mixed purpose, unknown category and invalid dates cannot plan'
 test('paid/approved/unknown targets and foreign company/browser origins fail closed',()=>{for(const text of ['ชำระเงินแล้ว','paid','approved','unknown'])assert.throws(()=>assertAwaiting(text));assertAwaiting('รอดำเนินการ');assert.throws(()=>assertCompanyUrl('https://evil.test/N270466/business/expenses','N270466'));assert.throws(()=>assertCompanyUrl('https://advance.flowaccount.com/N2/business/expenses','N270466'));});
 test('SSE fragments preserve wakes and ignore unrelated frames',()=>{const a=wakeFrames('','data: sub');assert.equal(a.wake,false);const b=wakeFrames(a.tail,'scribe,channel,1\n\n');assert.equal(b.wake,true);assert.equal(wakeFrames('','event: ping\n\n').wake,false);});
 test('owner group permits attachment-only bank proof, never dismissing amount or date uncertainty',()=>{
-  const c={companyId:'7',job:{override:{bucket:'online'}}};
+  const c={companyId:'7',job:{override:{bucket:'online'},attachmentOnly:true}};
   const slip={...receipt,kind:'payment_slip',expenseOnly:false,category:'unknown',uncertainties:['unknown_purpose','unknown_category']};
-  const normalized=attachmentReceipt(slip,c.job);assert.equal(receiptPlan(normalized,c).bucket,'online');assert.equal(normalized.expenseOnly,false);
+  const normalized=attachmentReceipt({...slip,currency:'Baht'},c.job);assert.equal(receiptPlan(normalized,c).bucket,'online');assert.equal(normalized.expenseOnly,false);assert.equal(normalized.currency,'THB');
   for(const code of ['unknown_amount','unknown_date','unclear_image'])assert.throws(()=>receiptPlan(attachmentReceipt({...slip,uncertainties:[code]},c.job),c));
   assert.throws(()=>receiptPlan(attachmentReceipt(slip,{override:{}}),{companyId:'7',job:{override:{}}}));
+});
+
+test('explicit owner expense purpose records a slip amount as an unpaid expense without inventing a tax invoice',()=>{
+  const job={override:{bucket:'online'},confirmedExpense:{bucket:'online',purpose:'online business purchases'}};
+  const slip={...receipt,kind:'payment_slip',expenseOnly:false,category:'unknown',currency:'Baht',uncertainties:['unknown_purpose','unknown_category']};
+  const r=attachmentReceipt(slip,job),p=receiptPlan(r,{companyId:'7',job});
+  assert.equal(r.kind,'receipt');assert.equal(r.sourceKind,'payment_slip');assert.equal(r.ownerConfirmedExpense,true);
+  assert.equal(r.category,'General expenses');assert.equal(r.total,31);assert.equal(p.paid,0);assert.equal(p.status,'awaiting');
+  assert.throws(()=>receiptPlan(attachmentReceipt({...slip,uncertainties:['inventory_or_asset']},job),{companyId:'7',job}));
+  assert.equal(attachmentReceipt(slip,{override:{bucket:'online'},confirmedExpense:{bucket:'electricity',purpose:'wrong bucket'}}).kind,'payment_slip');
+  assert.throws(()=>receiptPlan(attachmentReceipt(slip,{override:{bucket:'online'}}),{companyId:'7',job:{override:{bucket:'online'}}}));
 });
