@@ -3,9 +3,59 @@
 Existing translation, cashier checks and reminders remain in `api/webhook.js`.
 Set `LEGACY_BOTS_ENABLED=false` on the expense project to keep the previously
 disabled translator, cashier and scheduled reminders off.
+Legacy bots also stay off when that variable is absent; they require an explicit
+`true` so a new preview branch cannot accidentally reactivate them.
 
 The optional receipt feature adds monthly expense documents in FlowAccount,
 with one line per receipt and the original image attached. It is disabled by default.
+
+## MCP OAuth connection (no OpenAPI client credentials)
+
+The bot can establish its own persistent OAuth connection to the official
+`https://mcp.flowaccount.com/mcp` server. This is separate from a FlowAccount
+connection in ChatGPT and from a temporary capability-probe session.
+
+This milestone provides **connection, reads and previews only**. It does not
+enable expense creation, payment recording, image uploads or monthly updates.
+The official MCP catalog observed on 2026-11-03 exposed no attachment upload or
+expense update tool. Consequently the complete monthly receipt workflow still
+needs a supported attachment/update implementation before writes are enabled.
+The existing monthly handler below continues to use OpenAPI; merely enabling
+MCP connections does not switch that handler's backend or make OpenAPI free.
+
+To configure the connection without activating legacy bots or accounting writes:
+
+1. Set a **private** expense Redis URL/token, `LINE_CHANNEL_SECRET`, exact
+   `EXPENSE_GROUP_IDS` / `EXPENSE_USER_IDS`, and `FLOWACCOUNT_COMPANY_ID`.
+2. Set `APP_BASE_URL` to the deployment's canonical HTTPS origin (no path or
+   trailing slash). Set `FLOWACCOUNT_OAUTH_ENCRYPTION_KEY` to 32 random bytes
+   encoded as base64, stored only in server-side secret settings. Loss or rotation
+   of this key requires users to reconnect.
+3. Deploy the callback at `/api/flowaccount-callback`, then set
+   `MCP_CONNECTIONS_ENABLED=true`. Keep `LEGACY_BOTS_ENABLED=false`,
+   `RECEIPTS_ENABLED=false` and `FLOWACCOUNT_WRITE_ENABLED=false`.
+4. An allowlisted user in an allowlisted LINE group sends `flow connect`.
+   The bot returns an OAuth link valid for ten minutes. The user selects the
+   intended company and authorizes it in FlowAccount. Treat this link as personal;
+   group members must not forward it. A different-company selection is refused.
+5. Back in LINE, `flow status` verifies live access and reports the connected
+   company. A successful callback alone never acknowledges an expense.
+
+OAuth state and tokens are AES-256-GCM encrypted in private Redis. State is
+single-use and expires after ten minutes. Tokens are scoped to the initiating
+LINE user and group. Refreshes use a shared lock and preserve rotated refresh
+tokens. Only the fixed official OAuth and MCP origins receive credentials.
+The callback uses the configured origin, never an inbound Host header, and
+returns no tokens or authorization codes. No client secret is required.
+
+The MCP transport accepts JSON and SSE responses. Its explicit tool allowlist
+allows company/expense reads and expense previews with `confirm=false` only;
+confirmed creates, payments and all unlisted tools fail before network I/O.
+
+`npm test` covers OAuth PKCE, encrypted storage, state replay/expiry, issuer and
+company checks, refresh locking, SSE, payment/write rejection, LINE allowlists,
+callback secret redaction and signature checks in MCP-only mode. These tests
+mock the provider; the deployed LINE OAuth flow still requires live verification.
 
 ## Chat workflow
 
