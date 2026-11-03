@@ -67,6 +67,12 @@ test('real missing amount parks the original with one question and no preview/wr
   assert.equal(s.calls.find(c=>c[0]==='request_info')[1].question,'amount');
   assert.equal(s.calls.some(c=>['preview','submit','direct_complete'].includes(c[0])),false);
 });
+test('an incomplete billable AI read persists intent and cannot charge again on the next wake',async()=>{
+  const s=fixture();let attempted=false,reads=0;
+  const p=createEventExpenseProcessor({...s,markExtractionStarted:async()=>{attempted=true;},loadExtraction:async()=>{if(attempted)throw Error('Prior AI read is uncertain');return null;},extract:async()=>{reads++;throw Error('AI response timed out');}});
+  await assert.rejects(p.drain(),/timed out/);await assert.rejects(p.drain(),/Prior AI read/);assert.equal(reads,1);
+  assert.equal(s.calls.some(c=>c[0]==='submit'),false);
+});
 test('non-receipt images leave review without an expense or acknowledgement',async()=>{
   const s=fixture();s.receipt.kind='other';
   await createEventExpenseProcessor({...s,extract:async()=>s.receipt}).drain();

@@ -24,6 +24,10 @@ CurrentUser DPAPI files. The AI reader preserves the existing model and reserves
 at most 25 requests per Bangkok day before contacting the API, with no automatic
 model-call retry or billing top-up. Extraction is cached per original image and
 owner answers. Runtime and private payee rules stay in ignored `.local/`.
+The reader persists its attempt before the model call. An incomplete response or
+crash cannot charge for that same reading again on the next wake. Genuine job
+blockers emit one short quoted notice in the source group, without claiming the
+document was or was not saved; the existing financial state remains unchanged.
 If the standalone OAuth connection is missing, the listener waits without reading
 images or creating expenses. A successful verified OAuth callback publishes a
 connection event so queued work can resume after the owner authorizes FlowAccount.

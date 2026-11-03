@@ -109,6 +109,14 @@ test('month instruction during image reading applies until the immutable plan is
   await s.jobs.intake(s.text('לחודש הזה',{quotedMessageId:job.messageId}));
   assert.equal((await s.work('direct_context',{id:job.id})).job.plan.date,'2026-10-31');
 });
+test('a real event blocker sends one short notice and preserves an uncertain financial state',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('unknown-write'));
+  const {job}=await s.work('direct_claim');await s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:250}});
+  await s.work('direct_write_started',{id:job.id});
+  await s.work('direct_report_blocked',{id:job.id,reason:'Unknown create outcome'});await s.work('direct_report_blocked',{id:job.id,reason:'Still unknown'});
+  assert.equal(s.sent.length,1);assert.equal(s.sent[0][2],job.quoteToken);assert.notEqual(s.sent[0][1],'👍🏻');
+  assert.equal((await s.work('inspect',{id:job.id})).status,'writing');
+});
 
 test('owner can register a previously attachment-only slip once, preserving image, amount, document and prior audit',async()=>{
   const s=setup();await s.jobs.intake(s.image('confirmed-slip'));const {job}=await s.work('claim');

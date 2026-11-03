@@ -65,8 +65,12 @@ const cachePath=current=>{
   if(!/^[a-f0-9]{24}$/.test(current.job?.id||''))throw Error('Invalid receipt identity');
   return path.join(local,`receipt-${current.job.id}.json`);
 };
-const processor=createEventExpenseProcessor({worker,gateway,extract:createReceiptReader({apiKey:secrets.apiKey,model,reserveUsage}),onState:state,
-  loadExtraction:async(current,rules)=>{const c=JSON.parse(await readFile(cachePath(current),'utf8').catch(()=>'null'));return c?.key===cacheKey(current,rules)?c.receipt:null;},
+const processor=createEventExpenseProcessor({worker,gateway,extract:createReceiptReader({apiKey:secrets.apiKey,model,reserveUsage}),onState:async data=>{
+    await state(data);
+    if(data.state==='blocked'&&data.jobId)await worker('direct_report_blocked',{id:data.jobId,reason:data.reason}).catch(()=>{});
+  },
+  loadExtraction:async(current,rules)=>{const c=JSON.parse(await readFile(cachePath(current),'utf8').catch(()=>'null'));if(c?.key!==cacheKey(current,rules))return null;if(!c.receipt)throw Error('Prior AI read is uncertain; automatic model retry is blocked');return c.receipt;},
+  markExtractionStarted:async(current,rules)=>atomic(cachePath(current),{key:cacheKey(current,rules),attempted:true}),
   saveExtraction:async(current,rules,receipt)=>atomic(cachePath(current),{key:cacheKey(current,rules),receipt})});
 const stop=new AbortController();
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>stop.abort());
@@ -81,7 +85,7 @@ try{
   }
   if(mode==='once'){await gateway('preflight');await processor.drain();}
   else{
-    await whenConnected();
+    await whenConnected().catch(()=>{});
     let failures=0;
     while(!stop.signal.aborted){
       try{
