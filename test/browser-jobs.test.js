@@ -73,6 +73,15 @@ test('individual mode preserves legacy receipts and refuses a rephotographed rec
   await assert.rejects(s.work('direct_plan',{id:next.job.id,receipt:{...directReceipt(),vendor:'Different OCR spelling',invoiceNumber:'INV1'},preview:{valid:true,total:250}}),/already recorded/);
 });
 
+test('individual worker asks a short question for the missing fact in the original LINE group',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('unknown-payee'));
+  const {job}=await s.work('direct_claim');await s.work('request_info',{id:job.id,question:'identity'});
+  assert.equal(s.sent.length,1);assert.equal(s.sent[0][0],'G');assert.equal(s.sent[0][1],'מי המקבל שמופיע בסליפ?');assert.equal(s.sent[0][2],job.quoteToken);
+  assert.deepEqual(await s.work('direct_claim'),{idle:true});
+  await s.jobs.intake(s.text('Casey Example',{quotedMessageId:job.messageId}));
+  const resumed=await s.work('direct_claim');assert.equal(resumed.job.id,job.id);assert.equal(resumed.job.answers.at(-1).text,'Casey Example');assert.equal(resumed.job.plan,undefined);
+});
+
 test('owner can register a previously attachment-only slip once, preserving image, amount, document and prior audit',async()=>{
   const s=setup();await s.jobs.intake(s.image('confirmed-slip'));const {job}=await s.work('claim');
   const receipt={...s.plan(job.id).plan.receipt,kind:'payment_slip',total:3924,expenseOnly:false,category:'unknown'};

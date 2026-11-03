@@ -31,7 +31,7 @@ test('individual documents preserve the receipt date and apply an explicit month
   assert.equal(p.document.document_date,'2026-11-02');assert.equal(p.document.items.length,1);
   assert.equal(p.document.items[0].unit_price,250);assert.equal(p.document.payment,undefined);
   current.job.override.month='2026-10';const moved=buildDirectExpensePlan(r,current,directConfig());
-  assert.equal(moved.date,'2026-10-31');assert.match(moved.document.items[0].name,/2026-11-02/);
+  assert.equal(moved.date,'2026-10-31');assert.match(moved.document.internal_notes,/Receipt: 2026-11-02/);
 });
 
 test('company, original-photo consent, currency, uncertain amounts, tax and assets remain guarded',()=>{
@@ -49,7 +49,10 @@ test('existing contact resolution must match the recognized name',()=>{
 
 test('read-back verifies exact line, company, price, category, reference, taxes and unpaid state',()=>{
   const plan=buildDirectExpensePlan(directReceipt(),directCurrent(),directConfig());
-  const d={companyId:7,recordId:22,documentSerial:'EXP2026110004',status:1,statusString:'awaiting',collected:0,isForeignCurrency:false,publishedOn:plan.date+'T00:00:00',total:250,reference:plan.reference,contactName:plan.document.contact_name,vatValue:0,withholdingTaxAmount:0,discount:0,productItems:[{expenseDescription:plan.document.items[0].name,quantity:1,pricePerUnit:250,total:250,expenseCategoryId:11}]};
+  const d={companyId:7,recordId:22,documentSerial:'EXP2026110004',status:1,statusString:'awaiting',collected:0,isForeignCurrency:false,publishedOn:plan.date+'T00:00:00',total:250,reference:plan.reference,contactName:plan.document.contact_name,internalNotes:plan.document.internal_notes,vatValue:0,withholdingTaxAmount:0,discount:0,productItems:[{expenseDescription:plan.document.items[0].name,quantity:1,pricePerUnit:250,total:250,expenseCategoryId:11}]};
+  assert.equal(plan.document.items[0].name,'Office operating supplies');assert.ok(!plan.document.items[0].name.includes('[LINE:'));
   assert.equal(directEvidenceFromDocument(plan,{data:d}).total,250);
-  for(const patch of [{companyId:8},{status:2},{collected:250},{reference:'other'},{withholdingTaxAmount:3},{productItems:[{...d.productItems[0],pricePerUnit:0}]},{productItems:[...d.productItems,...d.productItems]}])assert.throws(()=>directEvidenceFromDocument(plan,{data:{...d,...patch}}));
+  for(const patch of [{companyId:8},{status:2},{collected:250},{reference:'other'},{internalNotes:''},{withholdingTaxAmount:3},{productItems:[{...d.productItems[0],pricePerUnit:0}]},{productItems:[...d.productItems,...d.productItems]}])assert.throws(()=>directEvidenceFromDocument(plan,{data:{...d,...patch}}));
+  const legacy={...plan,markerLocation:undefined,document:{...plan.document,items:[{...plan.document.items[0],name:`Office operating supplies ${plan.marker}`}]}};
+  assert.equal(directEvidenceFromDocument(legacy,{data:{...d,internalNotes:'',productItems:[{...d.productItems[0],expenseDescription:legacy.document.items[0].name}]}}).markerCount,1);
 });

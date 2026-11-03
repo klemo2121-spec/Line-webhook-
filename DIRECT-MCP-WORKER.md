@@ -33,7 +33,9 @@ dump credentials, print image base64, or send proof screenshots to the user.
    Create a private JSON {receipt:{kind:"receipt"|"payment_slip",readable,
    vendor,payeeName,invoiceNumber,transactionId,date,currency,total,
    descriptionEnglish,purpose,category,expenseOnly,withholding,uncertainties}}.
-   Use English descriptions; keep original proper-name text as evidence.
+   Use a short English label, usually 2–6 words: "Salary — Tommy", "Rent — Farm",
+   "Social Security". No explanations, dates or technical identifiers in the
+   visible expense line. Keep original proper-name text as private evidence.
    Gross/no-input-VAT and no payment is the owner's configured recording policy.
    Hold printed withholding, inventory/assets, foreign currency, unreadable
    amounts/dates, contradictory history or uncertain identity.
@@ -62,19 +64,26 @@ dump credentials, print image base64, or send proof screenshots to the user.
    keys can differ from a caller-supplied key; use the returned one.
 9. Read the created record with expense__get_document(view="full"). Write the
    structured response to a private JSON without printing it all. Run `evidence
-   FILE`; it checks the exact company/contact, serial, date, reference, one
-   marked line, price, category, total, zero VAT/WHT/discount and awaiting/unpaid
+   FILE`; it checks the exact company/contact, serial, date, reference, internal
+   tracking marker, one short line, price, category, total, zero VAT/WHT/discount and awaiting/unpaid
    state. Run `saved` with its verified-evidence file, then `complete` with
    {id,documentVerified:true}. Only completion sends 👍🏻 quoting the original
    LINE image. Do not send another success message or fabricate attachment proof.
 
 ## Questions and recovery
 
-Use `request-info FILE` with {id,question:"classification"} only before a plan.
+Use `request-info FILE` only before a plan. Pick the exact missing fact with
+question:"identity"|"purpose"|"month"|"date"|"amount" ("classification" means
+purpose). Ask one short, direct question in the source LINE group. Do not guess
+an unclear identity or category and do not put the question into the expense.
 It asks the owner in the source LINE group and parks the same original image.
 An owner's reply resumes it once, retaining text and arrival-time month changes.
 Use owner replies to resolve names/purpose; never use them to invent an image's
 amount or printed date. No separate employee verification is required.
+
+Keep descriptions short. Put the technical receipt marker only in internal
+notes, never in the visible line; omit routine integration explanations. Do not
+change an immutable in-progress plan merely to change its text format.
 
 `planned` means creation has not started: reuse the immutable saved plan, then
 mark write-started before the one create. `writing` is not safe to create again:
