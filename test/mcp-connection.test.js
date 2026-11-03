@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFlowOAuth } from '../lib/flowaccount-oauth.js';
-import { createMcpClient, MCP_ORIGIN, MCP_ENDPOINT } from '../lib/flowaccount-mcp.js';
+import { createMcpClient, createPlannedExpenseClient, MCP_ORIGIN, MCP_ENDPOINT } from '../lib/flowaccount-mcp.js';
+import {buildDirectExpensePlan} from '../lib/direct-expense-policy.js';
+import {directConfig,directReceipt,directCurrent} from './direct-expense-fixture.js';
 import { createLineFlowAccount } from '../lib/line-flowaccount.js';
 import { createCallback } from '../api/flowaccount-callback.js';
 import { parseLineRequest } from '../lib/receipts.js';
@@ -127,6 +129,20 @@ test('LINE connection commands are disabled by default and require exact group a
   await handle({ ...event, source: { ...actor, userId: 'U2' } }); assert.equal(started, 1);
   await handle({ ...event, source: { ...actor, groupId: 'G2' } }); assert.equal(started, 1);
   s.env.MCP_CONNECTIONS_ENABLED = 'false'; assert.equal(await handle(event), false);
+});
+
+test('event client exposes only immutable unpaid receipt creation; generic writes stay blocked',async()=>{
+  const s=setup(),client=await createPlannedExpenseClient({getToken:async()=>'token',fetchImpl:s.fetchImpl})();
+  const plan=buildDirectExpensePlan(directReceipt(),directCurrent(),directConfig());
+  const before=s.requests.length;
+  await assert.rejects(client.call('expense__create_expense',{confirm:true,document:plan.document}),/previews only/);
+  const paid=structuredClone(plan);paid.document.payment={payment_method:1};
+  await assert.rejects(client.createPlannedExpense(paid),/immutable unpaid/);
+  assert.equal(s.requests.length,before);
+  await client.createPlannedExpense(plan);
+  const rpc=JSON.parse(s.requests.at(-1).options.body);
+  assert.equal(rpc.params.arguments.confirm,true);assert.equal(rpc.params.arguments.document.payment,undefined);
+  assert.deepEqual(rpc.params.arguments.document,plan.document);
 });
 
 test('OAuth errors are not leaked to LINE and callback pages never echo codes', async () => {

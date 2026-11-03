@@ -1,5 +1,9 @@
 # Temporary LINE → one expense per receipt
 
+The owner cancelled the five-minute chat automation. Current event-based worker
+setup is documented in EVENT-WORKER.md. This document remains the manual native
+MCP recovery procedure; do not recreate the cancelled schedule.
+
 The owner authorized separate English expense documents through the connected
 official FlowAccounts MCP tools. Original images stay in LINE during this
 temporary phase. No browser, OpenAPI subscription, payment, approval, old bot,

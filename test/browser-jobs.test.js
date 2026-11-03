@@ -9,7 +9,7 @@ import {directConfig,directReceipt} from './direct-expense-fixture.js';
 
 const workerId = '11111111-1111-4111-8111-111111111111';
 function setup() {
-  let clock = Date.parse('2026-11-03T01:00:00Z'), failSend=false;
+  let clock = Date.parse('2026-11-03T01:00:00Z'), failSend=false,sendResponse;
   const env={BROWSER_WORKER_ENABLED:'true',EXPENSE_GROUP_IDS:'G',EXPENSE_USER_IDS:'U',FLOWACCOUNT_COMPANY_ID:'7',FLOWACCOUNT_OAUTH_ENCRYPTION_KEY:Buffer.alloc(32,31).toString('base64')};
   const values=new Map(),lists=new Map(),sent=[],published=[];
   const prefix='line-expenses:browser:v1:';
@@ -34,13 +34,13 @@ function setup() {
     throw Error('Unexpected Redis operation '+cmd);
   }
   let downloadCount=0;
-  const jobs=createBrowserJobs({env,redis,now:()=>clock,downloadLineImage:async id=>{downloadCount++;return {contentType:'image/jpeg',base64:Buffer.from('original-'+id).toString('base64')};},send:async(...args)=>{if(failSend)throw Error('LINE unavailable');sent.push(args);}});
+  const jobs=createBrowserJobs({env,redis,now:()=>clock,downloadLineImage:async id=>{downloadCount++;return {contentType:'image/jpeg',base64:Buffer.from('original-'+id).toString('base64')};},send:async(...args)=>{if(failSend)throw Error('LINE unavailable');sent.push(args);return sendResponse;}});
   const image=(id='1',userId='U')=>({type:'message',source:{groupId:'G',userId},message:{type:'image',id,quoteToken:'quote-'+id}});
   const text=(text,extra={})=>({type:'message',source:{groupId:'G',userId:'U'},message:{type:'text',id:'t'+Math.random(),text,...extra}});
   const work=(action,data={})=>jobs.work(action,{workerId,...data});
   const plan=id=>({id,plan:{companyId:'7',month:'2026-11',bucket:'online',date:'2026-11-30',beforeTotal:0,afterTotal:250,status:'awaiting',paid:0,receipt:{kind:'receipt',readable:true,vendor:'Office supplier',invoiceNumber:'INV1',date:'2026-11-02',currency:'THB',total:250,description:'Office supplies',expenseOnly:true,category:'General expenses',bucket:'online',withholding:0,uncertainties:[]}}});
   const evidence=id=>({id,evidence:{companyId:'7',serial:'EXP2026110002',recordId:'222',date:'2026-11-30',status:'awaiting',paid:0,total:250,marker:`[LINE:${id}]`}});
-  return {env,values,lists,sent,published,jobs,image,text,work,plan,evidence,prefix,downloads:()=>downloadCount,failSend:v=>{failSend=v;},advance:n=>{clock+=n;}};
+  return {env,values,lists,sent,published,jobs,image,text,work,plan,evidence,prefix,downloads:()=>downloadCount,failSend:v=>{failSend=v;},sendResponse:v=>{sendResponse=v;},advance:n=>{clock+=n;}};
 }
 
 test('individual MCP workflow needs explicit photo policy, blocks browser writes and acknowledges only verified records',async()=>{
@@ -80,6 +80,25 @@ test('individual worker asks a short question for the missing fact in the origin
   assert.deepEqual(await s.work('direct_claim'),{idle:true});
   await s.jobs.intake(s.text('Casey Example',{quotedMessageId:job.messageId}));
   const resumed=await s.work('direct_claim');assert.equal(resumed.job.id,job.id);assert.equal(resumed.job.answers.at(-1).text,'Casey Example');assert.equal(resumed.job.plan,undefined);
+});
+
+test('a reply quoting the bot question resumes its original image after a newer image arrives',async()=>{
+  const s=setup();s.sendResponse({sentMessages:[{id:'question-1'}]});
+  await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('older'));
+  const {job}=await s.work('direct_claim');await s.work('request_info',{id:job.id,question:'purpose'});
+  await s.jobs.intake(s.image('newer'));
+  await s.jobs.intake(s.text('Rent',{quotedMessageId:'question-1'}));
+  const older=await s.work('inspect',{id:job.id});assert.equal(older.status,'queued');assert.equal(older.answers.at(-1).text,'Rent');
+});
+
+test('question delivery failure resumes using the same retry key and never writes accounting',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('question-retry'));
+  const {job}=await s.work('direct_claim');s.failSend(true);
+  await assert.rejects(s.work('request_info',{id:job.id,question:'identity'}),/LINE unavailable/);
+  s.failSend(false);assert.deepEqual(await s.work('direct_claim'),{awaitingInfo:job.id});
+  assert.equal(s.sent.length,1);assert.equal(s.sent[0][1],'מי המקבל שמופיע בסליפ?');
+  assert.deepEqual(await s.work('direct_claim'),{idle:true});
+  assert.equal((await s.work('inspect',{id:job.id})).hasPlan,false);
 });
 
 test('owner can register a previously attachment-only slip once, preserving image, amount, document and prior audit',async()=>{
