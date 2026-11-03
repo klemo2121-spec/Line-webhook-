@@ -43,9 +43,9 @@ try {
   const {chromium}=await import(pathToFileURL(modulePath).href);
   context=await chromium.launchPersistentContext(path.join(privateRoot,'runner-chrome'),{channel:'chrome',headless:false,acceptDownloads:true});
   const page=context.pages()[0]||await context.newPage();
-  const companyRef='N270466';const driver=new FlowBrowserRunner(page,companyRef);
+  const companyRef='N270466';let driver=new FlowBrowserRunner(page,companyRef);
   await page.goto(`https://advance.flowaccount.com/${companyRef}/business/expenses`);
-  if(mode==='preflight'){
+  async function preflight(){
     await driver.openList();
     const rows=await driver.rows();
     const first=rows.length?await rows[0].innerText():'';
@@ -57,13 +57,11 @@ try {
     if(await form.getByText(/คลิกเพื่อเลือกไฟล์|Browse to upload/).count()!==1)throw Error('Attachment control changed');
     await log({state:'preflight_passed',automaticProcessing:false});
     console.log('Read-only browser preflight passed. Production writes remain unarmed until a supervised receipt test.');
-  }else if(mode==='login'){
-    await log({state:'login_required',automaticProcessing:false});console.log('Dedicated receipt browser opened. Sign in manually; no receipts will be written in login mode.');
-    await new Promise(resolve=>context.once('close',resolve));
-  }else{
-    // Explicitly armed only after a successful read-only preflight in the dedicated profile.
+  }
+  async function run(mode,supervised=false){
+    // Background mode requires an independently verified supervised receipt.
     const armed=JSON.parse(await readFile(path.join(privateRoot,'runner-ready.json'),'utf8').catch(()=>'{}'));
-    if(armed.verified!==true)throw Error('Dedicated browser preflight not yet verified; automatic writes are not armed');
+    if(!supervised&&armed.verified!==true)throw Error('Dedicated browser preflight not yet verified; automatic writes are not armed');
     let running=false,wakeAgain=false;
     async function drain(){
       if(running){wakeAgain=true;return;}running=true;
@@ -82,7 +80,7 @@ try {
         await worker('write-started',{id:current.job.id});
         const evidence=await driver.saveAndAttach(plan,target,current,before);
         await worker('saved',{id:current.job.id,evidence});
-        await worker('complete',{id:current.job.id,filename:current.job.filename,attachmentVerified:true,reopened:true});wakeAgain=true;
+        await worker('complete',{id:current.job.id,filename:current.job.filename,attachmentVerified:true,reopened:true});await log({state:'receipt_verified',jobId:current.job.id,automaticProcessing:!supervised});if(supervised)break;wakeAgain=true;
       }while(wakeAgain);}catch(error){await log({state:'blocked',reason:String(error.message).slice(0,250)});throw error;}finally{running=false;}
     }
     if(mode==='once')await drain();
@@ -96,4 +94,27 @@ try {
       await new Promise(resolve=>setTimeout(resolve,1000));
     }
   }
+  if(mode==='login'){
+    await log({state:'login_required',automaticProcessing:false});console.log('Dedicated receipt browser opened. Sign in manually; no receipts will be written in login mode.');
+    let closed=false;context.once('close',()=>{closed=true;});
+    // Private operator commands keep the authenticated browser alive during setup.
+    // A supervised once command is explicit; background start still requires verified evidence.
+    const commandPath=path.join(privateRoot,'runner-command.json');
+    while(!closed){
+      const command=JSON.parse(await readFile(commandPath,'utf8').catch(()=>'null'));
+      if(command){await unlink(commandPath);
+        try {
+          // Reload only our adapter code; preserve the live authenticated page.
+          const adapter=await import(new URL('../lib/flow-browser-runner.mjs?revision='+Date.now(),import.meta.url));
+          driver=new adapter.FlowBrowserRunner(page,companyRef);
+          if(command.action==='once')await run('once',true);
+          else if(command.action==='start')await run('start');
+          else if(command.action==='preflight')await preflight();
+        }catch(error){await log({state:'setup_blocked',automaticProcessing:false,reason:String(error.message).slice(0,250)});}
+      }
+      await new Promise(resolve=>setTimeout(resolve,1000));
+    }
+  }else if(mode==='preflight'){
+    await preflight();
+  }else{await run(mode);}
 } finally {await context?.close().catch(()=>{});await lock.close();await unlink(lockPath);}

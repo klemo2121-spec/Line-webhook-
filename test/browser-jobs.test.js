@@ -58,6 +58,14 @@ test('confirmed untouched review can be dismissed without acknowledgement; uncer
   await s.jobs.intake(s.image('uncertain'));const next=await s.work('claim');await s.work('plan',s.plan(next.job.id));await s.work('write_started',{id:next.job.id});await s.work('fail',{id:next.job.id,reason:'Unknown save outcome'});
   await assert.rejects(s.work('dismiss',{id:next.job.id,reason:'user_confirmed_no_action'}),/untouched/);
 });
+
+test('reviewed non-receipt rejection requires the exact image and cannot discard a financial plan',async()=>{
+  const s=setup();await s.jobs.intake(s.image('screenshot'));const {job}=await s.work('claim');await s.work('fail',{id:job.id,reason:'Screenshot, not receipt'});
+  await assert.rejects(s.work('reject_non_receipt',{id:job.id,imageHash:'wrong'}),/untouched/);
+  assert.deepEqual(await s.work('reject_non_receipt',{id:job.id,imageHash:job.imageHash}),{rejected:job.id});assert.equal(s.sent.length,0);assert.deepEqual(await s.work('claim'),{idle:true});
+  await s.jobs.intake(s.image('planned'));const next=await s.work('claim');await s.work('plan',s.plan(next.job.id));await s.work('fail',{id:next.job.id,reason:'Unknown'});
+  await assert.rejects(s.work('reject_non_receipt',{id:next.job.id,imageHash:next.job.imageHash}),/untouched/);
+});
 test('month instructions are evaluated on arrival, scoped and applied before claim',async()=>{
   const s=setup();await s.jobs.intake(s.text('הקבלה הבאה לחודש שעבר'));await s.jobs.intake(s.image());
   const c=await s.work('claim');assert.equal(c.job.override.month,'2026-10');

@@ -24,11 +24,24 @@ The Playwright module defaults to the installed bundled runtime. A different
 installed module may be selected with EXPENSE_PLAYWRIGHT_MODULE. No remote-debugging
 port is exposed and no existing Chrome session is attached.
 
-Live writes remain disabled without ignored private `runner-ready.json` containing
-`verified:true`. Do not create this based solely on unit tests. First verify the
-dedicated login and adapter against actual UI, then supervise a genuine new receipt
-through save, original image attachment/download hash, and quoted LINE success.
-No live unattended success has yet been established. No auto-start task is installed.
+Login mode now stays alive in the same authenticated browser and accepts private
+operator commands from `.local/browser/runner-command.json`: `{"action":"preflight"}`,
+`{"action":"once"}` or `{"action":"start"}`. Adapter fixes reload on each command
+without restarting Chrome. Login has no timeout. Do not close the browser to run
+preflight. Navigation inside an authenticated session uses the actual relative
+expense link, avoiding full page reloads. Only the specifically identified FlowAccount
+onboarding tutorial can be closed automatically; other modals still block.
+
+Background writes remain disabled without ignored private `runner-ready.json`
+containing `verified:true`. A supervised `once` command may test one genuine receipt
+before arming, as explicitly authorized by the operator. Do not arm based solely
+on unit tests. First verify the dedicated login and adapter against actual UI,
+then supervise a genuine new receipt through save, original image attachment/download
+hash, and quoted LINE success.
+Read-only preflight has passed in the dedicated live browser. The first supervised
+image was a screenshot of an expense list, correctly rejected for review before
+planning/writing. No live unattended success has yet been established. No auto-start
+task is installed.
 
 The image reader uses gpt-4.1-mini Responses API, store:false, at most 1,200 output
 tokens per request and 25 requests per Bangkok day. Requests reserve their daily
