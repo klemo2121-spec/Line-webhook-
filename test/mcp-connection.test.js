@@ -60,7 +60,8 @@ test('persistent OAuth uses PKCE, verifies company and encrypts tokens and pendi
   assert.equal(url.searchParams.get('redirect_uri'), 'https://expense.example/api/flowaccount-callback');
   assert.equal(await s.oauth.getToken(actor), 'SECRET-access');
   const serialized = JSON.stringify([...s.values]);
-  assert.doesNotMatch(serialized, /SECRET-access|SECRET-refresh|public-client|U1|G1/);
+  // Short actor IDs can occur by chance in randomized base64 ciphertext.
+  assert.doesNotMatch(serialized, /SECRET-access|SECRET-refresh|public-client|"U1"|"G1"/);
   assert.equal((await s.oauth.status(actor)).connected, true);
   assert.equal((await s.oauth.status({ ...actor, userId: 'U2' })).connected, false);
   await assert.rejects(s.oauth.complete(params), /already used/);
