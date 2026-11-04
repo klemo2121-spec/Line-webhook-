@@ -117,6 +117,18 @@ test('a real event blocker sends one short notice and preserves an uncertain fin
   assert.equal(s.sent.length,1);assert.equal(s.sent[0][2],job.quoteToken);assert.notEqual(s.sent[0][1],'👍🏻');
   assert.equal((await s.work('inspect',{id:job.id})).status,'writing');
 });
+test('reviewing a rejected original is read-only; recovery preserves it and cannot requeue twice or touch a plan',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('recover-original'));
+  const {job}=await s.work('direct_claim');await s.work('fail',{id:job.id,reason:'Classifier rejected'});await s.work('reject_non_receipt',{id:job.id,imageHash:job.imageHash});
+  const review=await s.work('direct_review_rejected',{id:job.id});assert.equal(review.job.id,job.id);assert.equal(review.image.base64,Buffer.from('original-recover-original').toString('base64'));
+  assert.deepEqual(await s.work('direct_claim'),{idle:true});
+  await assert.rejects(s.work('direct_recover_rejected',{id:job.id,imageHash:'wrong',originalReviewed:true}),/exact original/);
+  await s.work('direct_recover_rejected',{id:job.id,imageHash:job.imageHash,originalReviewed:true});
+  await assert.rejects(s.work('direct_recover_rejected',{id:job.id,imageHash:job.imageHash,originalReviewed:true}),/untouched rejected/);
+  assert.equal((await s.work('direct_claim')).job.id,job.id);
+  await s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:250}});
+  await assert.rejects(s.work('direct_review_rejected',{id:job.id}),/untouched rejected/);assert.equal(s.sent.length,0);
+});
 
 test('owner can register a previously attachment-only slip once, preserving image, amount, document and prior audit',async()=>{
   const s=setup();await s.jobs.intake(s.image('confirmed-slip'));const {job}=await s.work('claim');
