@@ -58,6 +58,30 @@ test('existing contact resolution must match the recognized name',()=>{
   assert.throws(()=>buildDirectExpensePlan(r,directCurrent(),directConfig(),{id:'123',name:'Other person'}));
 });
 
+test('owner product-heading policy uses the expense label as contact while preserving source recipient and dedup facts',()=>{
+  const config={...directConfig(),expenseHeading:'product'};
+  config.purposeRules.push({id:'gas',aliases:['CO2'],categoryId:11,categoryName:'General expenses',englishDescription:'CO2 supply',sourceRecords:[106]});
+  const receipt={...directReceipt(),kind:'payment_slip',vendor:'Example Gas Recipient',category:'unknown',expenseOnly:false,descriptionEnglish:'Bank transfer',uncertainties:['unknown_purpose','unknown_category']};
+  const current=directCurrent();current.job.override.purpose='CO2';
+  const plan=buildDirectExpensePlan(receipt,current,config);
+  assert.equal(plan.document.contact_name,'CO2 supply');assert.equal(plan.document.items[0].name,'CO2 supply');
+  assert.equal(plan.sourcePayee,'Example Gas Recipient');assert.equal(plan.receipt.vendor,receipt.vendor);
+  assert.ok(plan.document.internal_notes.includes('Payee: Example Gas Recipient'));assert.equal(plan.total,receipt.total);
+  assert.throws(()=>buildDirectExpensePlan(receipt,current,config,{id:'55',name:'Example Gas Recipient'}),/does not match/);
+  const resolved=buildDirectExpensePlan(receipt,current,config,{id:'56',name:'CO2 SUPPLY'});
+  assert.equal(resolved.document.contact_id,'56');assert.equal(resolved.sourcePayee,plan.sourcePayee);
+  assert.equal(buildDirectExpensePlan(receipt,current,{...config,expenseHeading:'payee'}).document.contact_name,receipt.vendor);
+});
+
+test('a saved product-heading expense must retain the actual recipient in notes',()=>{
+  const plan=buildDirectExpensePlan(directReceipt(),directCurrent(),{...directConfig(),expenseHeading:'product'});
+  const d={companyId:7,recordId:22,documentSerial:'EXP2026110004',status:1,statusString:'awaiting',collected:0,isForeignCurrency:false,publishedOn:plan.date,total:250,reference:plan.reference,contactName:plan.document.contact_name,internalNotes:plan.document.internal_notes,vatValue:0,withholdingTaxAmount:0,discount:0,productItems:[{expenseDescription:plan.document.items[0].name,quantity:1,pricePerUnit:250,total:250,expenseCategoryId:11}]};
+  assert.equal(directEvidenceFromDocument(plan,{data:d}).sourcePayee,'Demo supplier');
+  assert.throws(()=>directEvidenceFromDocument(plan,{data:{...d,internalNotes:plan.document.internal_notes.replace('Payee: Demo supplier','Payee: Different recipient')}}),/lost the original payee/);
+  const resolved={...plan,document:{...plan.document,contact_id:'77'}};
+  assert.throws(()=>directEvidenceFromDocument(resolved,{data:{...d,contactId:77,contactName:'Demo supplier'}}),/product heading differs/);
+});
+
 test('read-back verifies exact line, company, price, category, reference, taxes and unpaid state',()=>{
   const plan=buildDirectExpensePlan(directReceipt(),directCurrent(),directConfig());
   const d={companyId:7,recordId:22,documentSerial:'EXP2026110004',status:1,statusString:'awaiting',collected:0,isForeignCurrency:false,publishedOn:plan.date+'T00:00:00',total:250,reference:plan.reference,contactName:plan.document.contact_name,internalNotes:plan.document.internal_notes,vatValue:0,withholdingTaxAmount:0,discount:0,productItems:[{expenseDescription:plan.document.items[0].name,quantity:1,pricePerUnit:250,total:250,expenseCategoryId:11}]};

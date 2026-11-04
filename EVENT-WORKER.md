@@ -34,6 +34,14 @@ connection event so queued work can resume after the owner authorizes FlowAccoun
 
 ## Accounting
 
+The owner approved product-first list headings for FUTURE expenses. When private
+config expenseHeading=product, the short English expense label is also the
+document contact label (for example CO2 supply or Fertilizers). The original
+recipient stays in the immutable source receipt and a Payee: entry in internal
+notes, independently checked on saved read-back. Resolve product-label contacts
+separately; do not reuse or rename a real payee contact for that label. Existing
+plans/documents keep their previous format and financial state.
+
 The original remains in LINE. Each verified business receipt/slip becomes one
 English operating expense, with a short label, configured gross/no-input-VAT
 policy and no payment. Existing month instructions are preserved. Named payees

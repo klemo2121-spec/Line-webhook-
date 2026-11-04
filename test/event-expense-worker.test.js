@@ -114,6 +114,14 @@ test('a familiar payroll sender cannot override the printed commerce recipient o
   assert.equal(textInput.includes('Private owner clarification'),false);
 });
 
+test('product-heading contact resolution never selects the original payee contact by historical alias',async()=>{
+  const s=fixture();s.rules.expenseHeading='product';s.receipt.vendor='Alex Example';s.receipt.category='unknown';
+  const gateway=async(action,input)=>action==='contacts'?{contacts:[{id:'1',name:'Alex Example'},{id:'2',name:'Salary — Alex Example'}]}:s.gateway(action,input);
+  await createEventExpenseProcessor({...s,gateway,extract:async()=>s.receipt}).drain();
+  assert.equal(s.current.job.plan.document.contact_id,'2');assert.equal(s.current.job.plan.sourcePayee,'Alex Example');
+  assert.equal(s.calls.some(c=>c[0]==='request_info'),false);
+});
+
 test('an unreadable or self-conflicting transfer recipient cannot proceed or become a generic purpose question',async()=>{
   for(const recipientName of [null,'Alex Example']){
     const s=fixture();
