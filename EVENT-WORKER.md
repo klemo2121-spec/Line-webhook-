@@ -59,6 +59,10 @@ sender and recipient separately. For bank slips, code uses only the recipient,
 clears model-inferred purpose/category and applies private history afterward.
 The server rejects contradictory party fields before any plan. A familiar sender
 cannot become the expense recipient or trigger a salary/purpose classification.
+Where private history includes a verified contact source, the gateway re-reads
+that exact expense and checks company, record id, recipient name and contact id.
+It reuses that supplier without relying on the contact search index. This uses
+no historical amount, date or payment status for the new expense.
 
 ## Recovery
 

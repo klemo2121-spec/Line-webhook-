@@ -46,6 +46,8 @@ test('individual documents preserve the receipt date and apply an explicit month
 test('company, original-photo consent, currency, uncertain amounts, tax and assets remain guarded',()=>{
   for(const patch of [{currency:'USD'},{date:'2026-02-30'},{total:NaN},{withholding:null},{withholding:3},{expenseOnly:false},{uncertainties:['inventory_or_asset']},{descriptionEnglish:'הוצאה'}])assert.throws(()=>buildDirectExpensePlan({...directReceipt(),...patch},directCurrent(),directConfig()));
   for(const patch of [{companyId:'8'},{attachmentPolicy:'not_confirmed'},{ownerConsent:{originalsInLine:false}}])assert.throws(()=>buildDirectExpensePlan(directReceipt(),directCurrent(),{...directConfig(),...patch}));
+  const badSource=directConfig();badSource.payeeRules[0].contactRecordId=999;
+  assert.throws(()=>buildDirectExpensePlan(directReceipt(),directCurrent(),badSource),/verified historical expense/);
   assert.throws(()=>buildDirectExpensePlan({...directReceipt(),kind:'payment_slip',category:'unknown'},directCurrent(),directConfig()));
 });
 

@@ -122,7 +122,7 @@ test('event stream handles split frames, subscribe recovery, and refuses unrelat
   assert.throws(()=>parseWakeFrames('','x'.repeat(65537)),/frame/);
 });
 
-function gatewayFixture({status='planned',wrongCompany=false,failCreate=false}={}){
+function gatewayFixture({status='planned',wrongCompany=false,failCreate=false,documentPatch={}}={}){
   const current=directCurrent(),config=directConfig();
   Object.assign(current,{config});Object.assign(current.job,{groupId:'G',userId:'U',workflow:'mcp_individual_v1',status});
   current.job.plan=buildDirectExpensePlan(directReceipt(),current,config);
@@ -136,7 +136,7 @@ function gatewayFixture({status='planned',wrongCompany=false,failCreate=false}={
     if(action==='direct_saved')current.job.status='saved';
     return {};
   }};
-  const document=()=>({companyId:7,recordId:99,documentSerial:'EXP2026110004',publishedOn:'2026-11-02',status:1,statusString:'awaiting',collected:0,isForeignCurrency:false,contactName:'Demo supplier',internalNotes:current.job.plan.document.internal_notes,reference:current.job.plan.reference,total:250,vatValue:0,withholdingTaxAmount:0,discount:0,productItems:[{expenseDescription:'Office operating supplies',quantity:1,pricePerUnit:250,total:250,expenseCategoryId:11}]});
+  const document=()=>({companyId:7,recordId:99,documentSerial:'EXP2026110004',publishedOn:'2026-11-02',status:1,statusString:'awaiting',collected:0,isForeignCurrency:false,contactId:77,contactName:'Demo supplier',internalNotes:current.job.plan?.document.internal_notes,reference:current.job.plan?.reference,total:250,vatValue:0,withholdingTaxAmount:0,discount:0,productItems:[{expenseDescription:'Office operating supplies',quantity:1,pricePerUnit:250,total:250,expenseCategoryId:11}],...documentPatch});
   const preview={validation:{valid:true,totals:{grand_total:'250.00'}},review:{status:'ready',clarifications:[],blockers:[]}};
   const createClient=()=>async()=>({
     async call(name){
@@ -144,6 +144,7 @@ function gatewayFixture({status='planned',wrongCompany=false,failCreate=false}={
       if(name==='company_settings__load')return {user:{current_company_id:wrongCompany?'8':'7'},subscription:{permissions:{create_expense:true,create_document_ai:true,read_only_ai:false}}};
       if(name==='expense__create_expense')return preview;
       if(name==='expense__get_document')return {data:document()};
+      if(name==='contacts__list')return {data:{list:[{id:'77',nameLocal:'Demo supplier'}]}};
       if(name==='documents__get_creation_status')return {status:'completed',result:{company_id:7,record_id:99,document_serial:'EXP2026110004',idempotency_key:'actual-auto-key'}};
     },
     async createPlannedExpense(plan){calls.push('CREATE');assert.deepEqual(plan,current.job.plan);if(failCreate)throw Error('Unknown upstream outcome');return {status:'created',company_id:7,record_id:99,document_serial:'EXP2026110004',idempotency_key:'actual-auto-key'};},
@@ -153,6 +154,30 @@ function gatewayFixture({status='planned',wrongCompany=false,failCreate=false}={
   const gateway=createDirectMcpGateway({env,jobs,createClient,oauth:{status:async()=>({connected:true})}});
   return {gateway,current,calls,preview,env,jobs};
 }
+
+test('a known recipient reuses its exact contact from a re-read historical expense without a contact-index search',async()=>{
+  const s=gatewayFixture({status:'claimed',documentPatch:{total:999999}});delete s.current.job.plan;
+  s.current.config.payeeRules.push({id:'known-vendor',canonicalName:'Demo supplier',aliases:['Demo supplier'],sourceRecords:[99],contactRecordId:99});
+  const result=await s.gateway('contacts',{workerId,id:s.current.job.id,search:'Demo supplier'});
+  assert.deepEqual(result,{contacts:[{id:'77',name:'Demo supplier'}],hasMore:false});
+  assert.equal(s.calls.includes('expense__get_document'),true);
+  assert.equal(s.calls.includes('contacts__list'),false);
+  assert.equal(s.calls.includes('CREATE'),false);
+  const other=gatewayFixture({status:'claimed'});delete other.current.job.plan;
+  other.current.config.payeeRules=s.current.config.payeeRules;
+  await other.gateway('contacts',{workerId,id:other.current.job.id,search:'Demo'});
+  assert.equal(other.calls.includes('contacts__list'),true);
+  assert.equal(other.calls.includes('expense__get_document'),false);
+});
+
+test('historical contact lookup refuses another company, document, recipient or absent contact id',async()=>{
+  for(const documentPatch of [{companyId:8},{recordId:100},{contactName:'Different person'},{contactId:null}]){
+    const s=gatewayFixture({status:'claimed',documentPatch});delete s.current.job.plan;
+    s.current.config.payeeRules.push({id:'known-vendor',canonicalName:'Demo supplier',aliases:['Demo supplier'],sourceRecords:[99],contactRecordId:99});
+    await assert.rejects(s.gateway('contacts',{workerId,id:s.current.job.id,search:'Demo supplier'}),/Historical contact/);
+    assert.equal(s.calls.includes('CREATE'),false);
+  }
+});
 test('gateway records write intent before creating and saves returned anchor before read-back',async()=>{
   const s=gatewayFixture();await s.gateway('submit',{workerId,id:s.current.job.id});
   assert.ok(s.calls.indexOf('direct_write_started')<s.calls.indexOf('CREATE'));
