@@ -11,7 +11,7 @@ const workerId = '11111111-1111-4111-8111-111111111111';
 function setup() {
   let clock = Date.parse('2026-11-03T01:00:00Z'), failSend=false,sendResponse;
   const env={BROWSER_WORKER_ENABLED:'true',EXPENSE_GROUP_IDS:'G',EXPENSE_USER_IDS:'U',FLOWACCOUNT_COMPANY_ID:'7',FLOWACCOUNT_OAUTH_ENCRYPTION_KEY:Buffer.alloc(32,31).toString('base64')};
-  const values=new Map(),lists=new Map(),sent=[],published=[];
+  const values=new Map(),lists=new Map(),sent=[],published=[],downloadAliases=new Map(),waits=[];let onWait;
   const prefix='line-expenses:browser:v1:';
   async function redis([cmd,...a]) {
     if(cmd==='PUBLISH'){published.push(a);return 1;}
@@ -23,6 +23,7 @@ function setup() {
     if(cmd==='LINDEX')return (lists.get(a[0])||[])[Number(a[1])]??null;
     if(cmd==='LREM'){const list=lists.get(a[0])||[];const filtered=list.filter(v=>v!==a[2]);lists.set(a[0],filtered);return list.length-filtered.length;}
     if(cmd==='EVAL') {
+      if(a[1]==='4'){values.set(a[2],a[6]);lists.set(a[3],[...(lists.get(a[3])||[]),a[7]]);values.set(a[4],a[7]);values.set(a[5],a[8]);return 1;}
       if(a[1]==='2'){values.set(a[2],a[4]);lists.set(a[3],[...(lists.get(a[3])||[]),a[5]]);return 1;}
       if(a[1]==='3')return 1; // image-budget reservation; tested against real Redis separately.
       if(a[1]==='5') {
@@ -34,14 +35,54 @@ function setup() {
     throw Error('Unexpected Redis operation '+cmd);
   }
   let downloadCount=0;
-  const jobs=createBrowserJobs({env,redis,now:()=>clock,downloadLineImage:async id=>{downloadCount++;return {contentType:'image/jpeg',base64:Buffer.from('original-'+id).toString('base64')};},send:async(...args)=>{if(failSend)throw Error('LINE unavailable');sent.push(args);return sendResponse;}});
+  const jobs=createBrowserJobs({env,redis,now:()=>clock,wait:async ms=>{waits.push(ms);await onWait?.();},downloadLineImage:async id=>{downloadCount++;return {contentType:'image/jpeg',base64:Buffer.from('original-'+(downloadAliases.get(id)||id)).toString('base64')};},send:async(...args)=>{if(failSend)throw Error('LINE unavailable');sent.push(args);return sendResponse;}});
   const image=(id='1',userId='U')=>({type:'message',source:{groupId:'G',userId},message:{type:'image',id,quoteToken:'quote-'+id}});
   const text=(text,extra={})=>({type:'message',source:{groupId:'G',userId:'U'},message:{type:'text',id:'t'+Math.random(),text,...extra}});
   const work=(action,data={})=>jobs.work(action,{workerId,...data});
   const plan=id=>({id,plan:{companyId:'7',month:'2026-11',bucket:'online',date:'2026-11-30',beforeTotal:0,afterTotal:250,status:'awaiting',paid:0,receipt:{kind:'receipt',readable:true,vendor:'Office supplier',invoiceNumber:'INV1',date:'2026-11-02',currency:'THB',total:250,description:'Office supplies',expenseOnly:true,category:'General expenses',bucket:'online',withholding:0,uncertainties:[]}}});
   const evidence=id=>({id,evidence:{companyId:'7',serial:'EXP2026110002',recordId:'222',date:'2026-11-30',status:'awaiting',paid:0,total:250,marker:`[LINE:${id}]`}});
-  return {env,values,lists,sent,published,jobs,image,text,work,plan,evidence,prefix,downloads:()=>downloadCount,failSend:v=>{failSend=v;},sendResponse:v=>{sendResponse=v;},advance:n=>{clock+=n;}};
+  return {env,values,lists,sent,published,jobs,image,text,work,plan,evidence,prefix,waits,onWait:fn=>{onWait=fn;},sameImageAs:(id,prior)=>downloadAliases.set(id,prior),downloads:()=>downloadCount,failSend:v=>{failSend=v;},sendResponse:v=>{sendResponse=v;},advance:n=>{clock+=n;}};
 }
+
+test('a quoted owner purpose is captured quietly before the bot asks, on queued or claimed originals',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});
+  await s.jobs.intake(s.image('first'));await s.jobs.intake(s.image('second'));
+  const caption=s.text('CO2',{quotedMessageId:'first'});
+  await s.jobs.intake(caption);await s.jobs.intake(caption);
+  const {job}=await s.work('direct_claim');assert.equal(job.messageId,'first');assert.equal(job.override.purpose,'CO2');assert.equal(job.answers.length,1);
+  await s.jobs.intake(s.text('Fertilizers',{quotedMessageId:'first'}));
+  const latest=(await s.work('direct_context',{id:job.id})).job;
+  assert.equal(latest.override.purpose,'Fertilizers');assert.equal(latest.contextVersion,2);assert.equal(s.sent.length,0);
+});
+
+test('stale questions and plans restart from the owner caption without asking or saving a stale plan',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('caption-race'));
+  const {job}=await s.work('direct_claim');await s.jobs.intake(s.text('Rent',{quotedMessageId:job.messageId}));
+  assert.deepEqual(await s.work('request_info',{id:job.id,question:'purpose',contextVersion:0}),{retry:true});
+  assert.deepEqual(await s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:250},contextVersion:0}),{retry:true});
+  assert.equal((await s.work('inspect',{id:job.id})).hasPlan,false);assert.equal(s.sent.length,0);
+});
+
+test('a new upload of the same untouched parked image resumes its original job once and accepts captions on the new photo',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('original'));
+  const {job}=await s.work('direct_claim');await s.work('request_info',{id:job.id,question:'purpose'});s.sent.length=0;
+  s.sameImageAs('resent','original');await s.jobs.intake(s.image('resent'));const downloads=s.downloads();await s.jobs.intake(s.image('resent'));
+  assert.equal(s.downloads(),downloads);assert.equal(s.sent.length,0);
+  await s.jobs.intake(s.text('Fertilizers',{quotedMessageId:'resent'}));
+  const resumed=await s.work('direct_claim');assert.equal(resumed.job.id,job.id);assert.equal(resumed.job.messageId,'resent');assert.equal(resumed.job.quoteToken,'quote-resent');
+  assert.equal(resumed.job.override.purpose,'Fertilizers');assert.equal(resumed.job.sourceHistory[0].messageId,'original');
+  assert.equal(s.lists.get(s.prefix+'pending').length,1);
+  await s.work('direct_plan',{id:job.id,receipt:directReceipt(),preview:{valid:true,total:250}});await s.work('direct_write_started',{id:job.id});
+  s.sameImageAs('another','original');await s.jobs.intake(s.image('another'));
+  assert.equal((await s.work('inspect',{id:job.id})).status,'writing');assert.equal(s.lists.get(s.prefix+'pending').length,1);
+});
+
+test('temporary lock contention retries acquisition before capturing a caption, without repeating its mutation',async()=>{
+  const s=setup();await s.work('direct_configure',{config:directConfig()});await s.jobs.intake(s.image('busy'));
+  s.values.set(s.prefix+'coordinator','another-owner');s.onWait(()=>{if(s.waits.length===2)s.values.delete(s.prefix+'coordinator');});
+  await s.jobs.intake(s.text('CO2',{quotedMessageId:'busy'}));
+  assert.equal(s.waits.length,2);const {job}=await s.work('direct_claim');assert.equal(job.answers.length,1);assert.equal(job.override.purpose,'CO2');assert.equal(s.sent.length,0);
+});
 
 test('individual MCP workflow needs explicit photo policy, blocks browser writes and acknowledges only verified records',async()=>{
   const s=setup();await assert.rejects(s.work('direct_claim'),/not been configured/);

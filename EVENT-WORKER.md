@@ -52,6 +52,16 @@ internal marker, short line, category, amount, zero tax/discount/WHT and unpaid
 status. Only verified `direct_complete` sends 👍🏻 quoting the original photo.
 Missing facts use the existing short LINE questions. Replies may quote either
 the original image or the bot question; they resume the same original receipt.
+Owner captions quoting an image are captured while it is queued or being read,
+before any question. The processor refreshes the latest caption after reading;
+version guards prevent stale questions or plans when another caption arrives.
+Reader-v2 image facts are reused after captions change, without another AI call.
+Resending the same untouched image that was parked for clarification resumes
+that same job once, associates captions with the new photo and quotes it on
+completion. Planned/writing/completed duplicates never resume financial writes.
+Short coordinator contention retries only lock acquisition, never an operation.
+Receipt intake failures return HTTP503 for LINE redelivery instead of sending
+a generic chat error and falsely acknowledging successful intake.
 Bank-app screenshots are payment slips. A model classification of `other` parks
 the original and asks one document question; it cannot silently reject an image.
 The image reader receives no payroll/payee history or owner answers. It reads

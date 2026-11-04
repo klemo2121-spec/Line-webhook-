@@ -17,6 +17,7 @@ function fixture(status='claimed'){
     calls.push([action,input]);
     if(action==='direct_claim')return complete?{idle:true}:structuredClone(current);
     if(action==='direct_rules')return {config:rules};
+    if(action==='direct_context')return {...structuredClone(current),config:rules};
     if(action==='direct_plan'){current.job.plan=buildDirectExpensePlan(input.receipt,current,rules,input.existingContact);current.job.status='planned';return {status:'planned',plan:current.job.plan};}
     if(['direct_complete','request_info','reject_non_receipt'].includes(action))complete=true;
     return {};
@@ -41,7 +42,7 @@ test('one event processes a receipt in order and concurrent wakes cannot create 
   await Promise.all([processor.drain(),processor.drain()]);
   assert.equal(reads,1);
   const actions=s.calls.map(c=>c[0]);
-  assert.deepEqual(actions,['direct_claim','direct_rules','contacts','preview','direct_plan','submit','verify','direct_complete','direct_claim']);
+  assert.deepEqual(actions,['direct_claim','direct_rules','direct_context','contacts','preview','direct_plan','submit','verify','direct_complete','direct_claim']);
   assert.equal(s.current.job.plan.document.items[0].name,'Office operating supplies');
   assert.equal(s.current.job.plan.document.payment,undefined);
 });
@@ -66,6 +67,28 @@ test('real missing amount parks the original with one question and no preview/wr
   await createEventExpenseProcessor({...s,extract:async()=>s.receipt}).drain();
   assert.equal(s.calls.find(c=>c[0]==='request_info')[1].question,'amount');
   assert.equal(s.calls.some(c=>['preview','submit','direct_complete'].includes(c[0])),false);
+});
+
+test('a fertilizer caption arriving during image reading resolves the historical company category without another question',async()=>{
+  const s=fixture();s.rules.categoryCatalog.push({id:15,name:'Purchased for servicing'});
+  s.rules.purposeRules.push({id:'farm-fertilizer',aliases:['Fertilizer','Fertilizers'],categoryId:15,categoryName:'Purchased for servicing',englishDescription:'Fertilizers',sourceRecords:[106]});
+  Object.assign(s.receipt,{kind:'payment_slip',category:'unknown',expenseOnly:false,uncertainties:['unknown_purpose','unknown_category']});
+  await createEventExpenseProcessor({...s,extract:async()=>{s.current.job.override.purpose='Fertilizers';s.current.job.contextVersion=1;return s.receipt;}}).drain();
+  assert.equal(s.calls.some(c=>c[0]==='request_info'),false);assert.equal(s.current.job.plan.document.items[0].name,'Fertilizers');
+  assert.equal(s.current.job.plan.document.items[0].category_id,15);assert.equal(s.calls.filter(c=>c[0]==='submit').length,1);
+});
+
+test('a caption racing a missing-purpose question restarts planning from cached image facts with no second AI call',async()=>{
+  const s=fixture();Object.assign(s.receipt,{kind:'payment_slip',category:'unknown',expenseOnly:false,uncertainties:['unknown_purpose','unknown_category']});
+  s.rules.purposeRules.push({id:'gas',aliases:['CO2'],categoryId:11,categoryName:'General expenses',englishDescription:'CO2 supply',sourceRecords:[106]});
+  let cache,reads=0,restarts=0;
+  const worker=async(action,input)=>{
+    if(action==='request_info'&&!restarts){restarts++;s.current.job.override.purpose='CO2';s.current.job.contextVersion=1;return {retry:true};}
+    return s.worker(action,input);
+  };
+  await createEventExpenseProcessor({...s,worker,loadExtraction:async()=>cache,saveExtraction:async(c,r,receipt)=>{cache=receipt;},extract:async()=>{reads++;return s.receipt;}}).drain();
+  assert.equal(reads,1);assert.equal(restarts,1);assert.equal(s.current.job.plan.document.items[0].name,'CO2 supply');
+  assert.equal(s.calls.some(c=>c[0]==='request_info'),false);assert.equal(s.calls.filter(c=>c[0]==='submit').length,1);
 });
 
 test('a familiar payroll sender cannot override the printed commerce recipient or ask a redundant purpose question',async()=>{
@@ -110,7 +133,7 @@ test('an incomplete billable AI read persists intent and cannot charge again on 
 test('a model non-receipt classification asks about the original instead of silently discarding it',async()=>{
   const s=fixture();s.receipt.kind='other';
   await createEventExpenseProcessor({...s,extract:async()=>s.receipt}).drain();
-  assert.deepEqual(s.calls.map(c=>c[0]),['direct_claim','direct_rules','request_info','direct_claim']);
+  assert.deepEqual(s.calls.map(c=>c[0]),['direct_claim','direct_rules','direct_context','request_info','direct_claim']);
   assert.equal(s.calls.find(c=>c[0]==='request_info')[1].question,'document');
 });
 test('event stream handles split frames, subscribe recovery, and refuses unrelated messages',()=>{

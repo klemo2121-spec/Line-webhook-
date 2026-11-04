@@ -72,6 +72,10 @@ export default async function handler(req, res) {
       } catch (error) {
         console.error('Event error:', error);
 
+        // Intake failures must be redeliverable. A success response plus a generic
+        // chat error used to lose a caption arriving while the worker held a lock.
+        if(process.env.BROWSER_WORKER_ENABLED==='true'&&String(process.env.EXPENSE_GROUP_IDS||'').split(',').map(s=>s.trim()).includes(event.source?.groupId))return res.status(503).json({ok:false,error:'Receipt intake unavailable; retry delivery'});
+
         if (event.replyToken) {
           await replyText(
             event.replyToken,

@@ -69,9 +69,17 @@ const processor=createEventExpenseProcessor({worker,gateway,extract:createReceip
     await state(data);
     if(data.state==='blocked'&&data.jobId)await worker('direct_report_blocked',{id:data.jobId,reason:data.reason}).catch(()=>{});
   },
-  loadExtraction:async(current,rules)=>{const c=JSON.parse(await readFile(cachePath(current),'utf8').catch(()=>'null'));if(c?.key!==cacheKey(current,rules))return null;if(!c.receipt)throw Error('Prior AI read is uncertain; automatic model retry is blocked');return c.receipt;},
-  markExtractionStarted:async(current,rules)=>atomic(cachePath(current),{key:cacheKey(current,rules),attempted:true}),
-  saveExtraction:async(current,rules,receipt)=>atomic(cachePath(current),{key:cacheKey(current,rules),receipt})});
+  loadExtraction:async(current,rules)=>{
+    const c=JSON.parse(await readFile(cachePath(current),'utf8').catch(()=>'null'));if(!c)return null;
+    if(c.imageHash&&c.imageHash!==current.job.imageHash)throw Error('Cached original image identity changed');
+    if(!c.receipt)throw Error('Prior AI read is uncertain; automatic model retry is blocked');
+    // Reader v2 never receives owner captions or payee history. Those changes
+    // must re-run deterministic planning, never charge for reading this image again.
+    if(c.receipt.readerVersion===2||c.key===cacheKey(current,rules))return c.receipt;
+    throw Error('Legacy image reading needs review before reuse');
+  },
+  markExtractionStarted:async(current,rules)=>atomic(cachePath(current),{key:cacheKey(current,rules),imageHash:current.job.imageHash,attempted:true}),
+  saveExtraction:async(current,rules,receipt)=>atomic(cachePath(current),{key:cacheKey(current,rules),imageHash:current.job.imageHash,receipt})});
 const stop=new AbortController();
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>stop.abort());
 try{
