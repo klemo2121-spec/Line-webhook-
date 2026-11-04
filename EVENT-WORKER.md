@@ -52,6 +52,8 @@ internal marker, short line, category, amount, zero tax/discount/WHT and unpaid
 status. Only verified `direct_complete` sends 👍🏻 quoting the original photo.
 Missing facts use the existing short LINE questions. Replies may quote either
 the original image or the bot question; they resume the same original receipt.
+Bank-app screenshots are payment slips. A model classification of `other` parks
+the original and asks one document question; it cannot silently reject an image.
 
 ## Recovery
 
@@ -63,6 +65,12 @@ retries the same acknowledgement. Originals expiring, ambiguous contacts,
 withholding, assets/inventory, foreign currency or unsupported preview blockers
 cannot silently become expenses. Review `.local/browser/event/status.json` for
 the current state. Do not start old browser-worker or expense-runner processes.
+
+An operator can use `direct-expense-worker.mjs review-rejected FILE` to read an
+untouched rejected individual original. After visually reviewing that exact
+image, `recover-rejected FILE` requires its id, matching imageHash and
+originalReviewed:true. It restores the same job once and records the review;
+it cannot recover a job with a financial plan or replay a financial write.
 
 Passing automated tests and a read-only preflight is not an end-to-end accounting
 success. The first fresh real receipt still needs its independent saved read-back.

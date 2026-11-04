@@ -73,10 +73,11 @@ test('an incomplete billable AI read persists intent and cannot charge again on 
   await assert.rejects(p.drain(),/timed out/);await assert.rejects(p.drain(),/Prior AI read/);assert.equal(reads,1);
   assert.equal(s.calls.some(c=>c[0]==='submit'),false);
 });
-test('non-receipt images leave review without an expense or acknowledgement',async()=>{
+test('a model non-receipt classification asks about the original instead of silently discarding it',async()=>{
   const s=fixture();s.receipt.kind='other';
   await createEventExpenseProcessor({...s,extract:async()=>s.receipt}).drain();
-  assert.deepEqual(s.calls.map(c=>c[0]),['direct_claim','direct_rules','fail','reject_non_receipt','direct_claim']);
+  assert.deepEqual(s.calls.map(c=>c[0]),['direct_claim','direct_rules','request_info','direct_claim']);
+  assert.equal(s.calls.find(c=>c[0]==='request_info')[1].question,'document');
 });
 test('event stream handles split frames, subscribe recovery, and refuses unrelated messages',()=>{
   let p=parseWakeFrames('','data: sub');assert.equal(p.wake,false);
