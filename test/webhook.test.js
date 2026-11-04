@@ -15,7 +15,14 @@ test('health check remains available without credentials',async()=>{
   const res=response(); await handler({method:'GET',query:{},headers:{}},res); assert.equal(res.statusCode,200); assert.equal(res.value,'OK');
 });
 test('missing cron secret fails closed rather than treating empty key as authorized',async()=>{
+  process.env.LEGACY_BOTS_ENABLED='true';
   const res=response(); await handler({method:'GET',query:{action:'start'},headers:{}},res); assert.equal(res.statusCode,401);
+  delete process.env.LEGACY_BOTS_ENABLED;
+});
+
+test('legacy bots remain off when a new deployment has no legacy flag',async()=>{
+  delete process.env.LEGACY_BOTS_ENABLED;
+  const res=response();await handler({method:'GET',query:{action:'start'},headers:{}},res);assert.equal(res.value.sent,false);
 });
 test('expense-only mode keeps old text bots and scheduled reminders disabled',async()=>{
   process.env.LEGACY_BOTS_ENABLED='false'; process.env.RECEIPTS_ENABLED='false';

@@ -1,9 +1,14 @@
 import { parseLineRequest } from '../lib/receipts.js';
 import { createMonthlyHandler } from '../lib/monthly-expenses.js';
+import { createLineFlowAccount } from '../lib/line-flowaccount.js';
+import { createBrowserJobs } from '../lib/browser-jobs.js';
+import { pushBrowserMessage } from '../lib/line-push.js';
 
 export const config = { api: { bodyParser: false } };
 export const maxDuration = 60;
 const handleReceiptEvent = createMonthlyHandler({ downloadLineImage, replyText });
+const handleFlowAccountConnection = createLineFlowAccount({ replyText });
+const browserJobs = createBrowserJobs({ downloadLineImage, send:pushBrowserMessage });
 
 // api/webhook.js
 // LINE Translator + Cashier Bot
@@ -25,7 +30,7 @@ export default async function handler(req, res) {
     const key = String(req.query?.key || '').trim();
 
     if (action) {
-      if (process.env.LEGACY_BOTS_ENABLED === 'false') return res.status(200).json({ ok: true, sent: false, reason: 'Legacy bots disabled' });
+      if (process.env.LEGACY_BOTS_ENABLED !== 'true') return res.status(200).json({ ok: true, sent: false, reason: 'Legacy bots disabled' });
       const bearer = req.headers?.authorization;
       if (!CRON_SECRET || (key !== CRON_SECRET && bearer !== `Bearer ${CRON_SECRET}`)) {
         return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -95,8 +100,12 @@ async function handleEvent(event) {
     messageType,
   });
 
+  if (await handleFlowAccountConnection(event)) return;
+  if (await browserJobs.intake(event)) return;
+  // Browser mode exclusively owns this group; never fall through to OpenAPI.
+  if (process.env.BROWSER_WORKER_ENABLED === 'true' && String(process.env.EXPENSE_GROUP_IDS || '').split(',').map(s => s.trim()).includes(groupId)) return;
   if (await handleReceiptEvent(event)) return;
-  if (process.env.LEGACY_BOTS_ENABLED === 'false') return;
+  if (process.env.LEGACY_BOTS_ENABLED !== 'true') return;
 
   if (groupId === CASHIER_GROUP_ID) {
     await handleCashierMessage(event);
@@ -1916,3 +1925,4 @@ function extractJson(text) {
     }
   }
 }
+
