@@ -25,7 +25,7 @@ if(command==='prepare'){
   const evidence=directEvidenceFromDocument(current.job.plan,input),file=path.join(current.folder,'verified-evidence.json');
   await writeFile(file,JSON.stringify({id:current.job.id,evidence},null,2));console.log(JSON.stringify({file,evidence}));
 }else{
-  const action={configure:'direct_configure',rules:'direct_rules',claim:'direct_claim','review-rejected':'direct_review_rejected','recover-rejected':'direct_recover_rejected',plan:'direct_plan','write-started':'direct_write_started',created:'direct_created',saved:'direct_saved',complete:'direct_complete','request-info':'request_info',fail:'fail',inspect:'inspect'}[command];
+  const action={configure:'direct_configure',rules:'direct_rules',claim:'direct_claim','review-rejected':'direct_review_rejected','recover-rejected':'direct_recover_rejected','resume-info':'resume_info',plan:'direct_plan','write-started':'direct_write_started',created:'direct_created',saved:'direct_saved',complete:'direct_complete','request-info':'request_info',fail:'fail',inspect:'inspect'}[command];
   if(!action)throw Error('Use configure FILE | rules | claim | prepare FILE | plan FILE | write-started FILE | evidence FILE | saved FILE | complete FILE | request-info FILE | fail FILE | inspect FILE');
   const token=(await promisify(execFile)(python,[path.join(root,'scripts/browser-secrets.py'),'read'],{windowsHide:true})).stdout;
   if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw Error('Invalid protected worker credential');

@@ -67,6 +67,40 @@ test('real missing amount parks the original with one question and no preview/wr
   assert.equal(s.calls.find(c=>c[0]==='request_info')[1].question,'amount');
   assert.equal(s.calls.some(c=>['preview','submit','direct_complete'].includes(c[0])),false);
 });
+
+test('a familiar payroll sender cannot override the printed commerce recipient or ask a redundant purpose question',async()=>{
+  const s=fixture();
+  s.current.image={contentType:'image/jpeg',base64:'eA=='};
+  s.rules.payeeRules.push({id:'online-wallet',canonicalName:'EXAMPLEPAY',aliases:['EXAMPLEPAY'],categoryId:11,categoryName:'General expenses',englishDescription:'Online shopping',sourceRecords:[106]});
+  const raw={...s.receipt,date:'2026-11-04T11:02:00',kind:'payment_slip',senderName:'Alex Example',recipientName:'EXAMPLEPAY',vendor:'Alex Example',payeeName:'Alex Example',purpose:'Salary — Alex Example',category:'Salary/Wages'};
+  let request;
+  const extract=createReceiptReader({apiKey:'sk-test',model:'configured-model',reserveUsage:async()=>{},fetchImpl:async(url,options)=>{
+    request=JSON.parse(options.body);
+    return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(raw)}]}]}));
+  }});
+  s.current.job.answers=[{text:'Private owner clarification'}];
+  await createEventExpenseProcessor({...s,extract}).drain();
+  assert.equal(s.current.job.plan.document.contact_name,'EXAMPLEPAY');
+  assert.equal(s.current.job.plan.document.items[0].name,'Online shopping');
+  assert.equal(s.current.job.plan.document.items[0].category_id,11);
+  assert.equal(s.current.job.plan.date,'2026-11-04');
+  assert.equal(s.calls.some(c=>c[0]==='request_info'),false);
+  assert.equal(s.calls.filter(c=>c[0]==='submit').length,1);
+  const textInput=request.input[0].content.find(c=>c.type==='input_text').text;
+  assert.equal(textInput.includes('Alex Example'),false);
+  assert.equal(textInput.includes('Private owner clarification'),false);
+});
+
+test('an unreadable or self-conflicting transfer recipient cannot proceed or become a generic purpose question',async()=>{
+  for(const recipientName of [null,'Alex Example']){
+    const s=fixture();
+    s.current.image={contentType:'image/jpeg',base64:'eA=='};
+    const raw={...s.receipt,kind:'payment_slip',senderName:'Alex Example',recipientName};
+    const extract=createReceiptReader({apiKey:'sk-test',model:'configured-model',reserveUsage:async()=>{},fetchImpl:async()=>new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(raw)}]}]}))});
+    await assert.rejects(createEventExpenseProcessor({...s,extract}).drain(),/recipient reading/);
+    assert.equal(s.calls.some(c=>['request_info','submit','direct_plan'].includes(c[0])),false);
+  }
+});
 test('an incomplete billable AI read persists intent and cannot charge again on the next wake',async()=>{
   const s=fixture();let attempted=false,reads=0;
   const p=createEventExpenseProcessor({...s,markExtractionStarted:async()=>{attempted=true;},loadExtraction:async()=>{if(attempted)throw Error('Prior AI read is uncertain');return null;},extract:async()=>{reads++;throw Error('AI response timed out');}});

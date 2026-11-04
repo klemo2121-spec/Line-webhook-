@@ -54,6 +54,11 @@ Missing facts use the existing short LINE questions. Replies may quote either
 the original image or the bot question; they resume the same original receipt.
 Bank-app screenshots are payment slips. A model classification of `other` parks
 the original and asks one document question; it cannot silently reject an image.
+The image reader receives no payroll/payee history or owner answers. It reads
+sender and recipient separately. For bank slips, code uses only the recipient,
+clears model-inferred purpose/category and applies private history afterward.
+The server rejects contradictory party fields before any plan. A familiar sender
+cannot become the expense recipient or trigger a salary/purpose classification.
 
 ## Recovery
 

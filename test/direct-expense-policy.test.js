@@ -17,6 +17,15 @@ test('known social-security recipient maps to its own category',()=>{
   assert.equal(buildDirectExpensePlan(r,directCurrent(),directConfig()).document.items[0].category_id,13);
 });
 
+test('server refuses a bank reading whose legacy payee fields substitute the sender for the observed recipient',()=>{
+  const receipt={...directReceipt(),readerVersion:2,kind:'payment_slip',senderName:'Alex Example',recipientName:'Demo supplier',vendor:'Alex Example',payeeName:'Alex Example',purpose:'Salary',category:'Salary/Wages'};
+  assert.throws(()=>buildDirectExpensePlan(receipt,directCurrent(),directConfig()),/recipient reading/);
+  const current=directCurrent();current.job.override.bucket='online';
+  const valid={...receipt,vendor:'Demo supplier',payeeName:'Demo supplier',purpose:null,category:'unknown'};
+  assert.equal(buildDirectExpensePlan(valid,current,directConfig()).document.contact_name,'Demo supplier');
+  assert.equal(recognizeExpense(valid,directConfig()),null);
+});
+
 test('contradictory purpose, ambiguous aliases and category conflicts require review',()=>{
   const r={...directReceipt(),vendor:'Alex Example',category:'unknown'};
   for(const patch of [{purpose:'employee reimbursement'},{purpose:'rent'},{category:'General expenses'}])assert.throws(()=>buildDirectExpensePlan({...r,...patch},directCurrent(),directConfig()));
