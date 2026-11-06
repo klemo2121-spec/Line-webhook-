@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {generateKeyPairSync} from 'node:crypto';
+import {seal,unseal,digest,fingerprint} from './transfer-crypto.mjs';
+const keys=generateKeyPairSync('rsa',{modulusLength:3072,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});
+const source=digest('synthetic old computer'),value={workerToken:'FAKE-WORKER-TOKEN',runner:{apiKey:'sk-fake-test-key-not-real',model:'test-model'}};
+const prepared=()=>seal(value,keys.publicKey,fingerprint(keys.publicKey),source);
+test('credentials round trip without plaintext values in the envelope',()=>{const v=prepared();assert.deepEqual(unseal(v,keys.privateKey,source),value);assert.ok(!JSON.stringify(v).includes(value.runner.apiKey));assert.ok(!JSON.stringify(v).includes(value.workerToken));});
+test('receiver fingerprint mismatch stops before export',()=>assert.throws(()=>seal(value,keys.publicKey,digest('wrong recipient'),source),/identity/));
+test('a different source computer is refused',()=>assert.throws(()=>unseal(prepared(),keys.privateKey,digest('wrong source')),/identity/));
+test('changing authenticated metadata is refused',()=>{const v=prepared();v.header.createdAt='changed';assert.throws(()=>unseal(v,keys.privateKey,source));});
+test('changing encrypted credentials is refused',()=>{const v=prepared(),b=Buffer.from(v.ciphertext,'base64');b[0]^=1;v.ciphertext=b.toString('base64');assert.throws(()=>unseal(v,keys.privateKey,source));});
+test('truncated authentication tags are refused',()=>{const v=prepared();v.tag='YQ==';assert.throws(()=>unseal(v,keys.privateKey,source),/Invalid/);});
